@@ -5,12 +5,12 @@
     + Master fetch all files name and stores them.
     + Master reads all files, and get each lines number
     + Master reads all files, and get TOTAL lines number, say 1000.
-    - Master make the partion of the work data, so each process receive an equal
+    + Master make the chunks, so that each process receive an equal
    number of lines. Say we have 4 processes, each of them should work on 250
-   lines, but they are distributed differenly in the files. Master should send
-   the slaves (and to itself too) an array of structs like this: (a fileName
-   where a process should work, starting line number, ending line number
-   (inclusive)).
+   lines, but they are distributed differenly in the files.
+    + Master prepares sendCount and displs
+    - Master scatters sendCount
+    - Master scatters the chunks
     - Each process launch the wordsCount function on each file, according to its
    work range. wordsCount access the file according to the given name and fetch
    all work lines. wordsCount return an array of structs like this: (word string
@@ -58,11 +58,17 @@ typedef struct FileName {
   long int lineNumber;
 } t_FileName;
 
-typedef struct Chunk {
+typedef struct ChunkNode {
   t_FileName *fileName;
   long int startLine;
   long int endLine;
-  struct Chunk *next;
+  struct ChunkNode *next;
+} t_ChunkNode;
+
+typedef struct Chunk {
+  char *fileName;
+  long int startLine;
+  long int endLine;
 } t_Chunk;
 
 // fileNames will be an array pointer to a list of FileNames; the return value
@@ -146,8 +152,8 @@ void printLinesNumber(t_FileName *fileNames, int fileNumber) {
   }
 }
 
-t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
-                        long int totalLineNumber, int p) {
+t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
+                            long int totalLineNumber, int p) {
   long int standardChunkSize = totalLineNumber / p;
 #ifdef DEBUG
   printf("Standard chunk size: %ld\n", standardChunkSize);
@@ -155,20 +161,22 @@ t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
   int remainder = totalLineNumber % p;
 
   long int nextChunkSize = standardChunkSize;
+  if (remainder > 0) {
+    nextChunkSize++;
+    remainder--;
+  }
   t_FileName *fileNamesPtr = fileNames;
-  t_Chunk *firstChunkPtr = NULL, *chunkPtr = NULL;
+  t_ChunkNode *firstChunkPtr = NULL, *chunkPtr = NULL;
   for (int i = 0; i < fileNumber; i++) {
-    // TODO Fix with remainder that increase the chunck Size by 1 for first
-    // remainder chuncks
     long int lastLine = -1;
     long int leftLines = fileNamesPtr->lineNumber;
     while (leftLines > 0) {
       // New chunk for this file. If it is the first, it will be the head
       if (chunkPtr == NULL) {
-        chunkPtr = (t_Chunk *)malloc(sizeof(t_Chunk));
+        chunkPtr = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
         firstChunkPtr = chunkPtr;
       } else {
-        chunkPtr->next = (t_Chunk *)malloc(sizeof(t_Chunk));
+        chunkPtr->next = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
         chunkPtr = chunkPtr->next;
       }
       chunkPtr->fileName = fileNamesPtr;
@@ -183,6 +191,10 @@ t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
       if (leftLines >= nextChunkSize) {
         actualChunkSize = nextChunkSize;
         nextChunkSize = standardChunkSize;
+        if (remainder > 0) {
+          nextChunkSize++;
+          remainder--;
+        }
       } else {
         actualChunkSize = leftLines;
         nextChunkSize -= leftLines;
@@ -200,21 +212,90 @@ t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
   return firstChunkPtr;
 }
 
-void printChunkList(t_Chunk *firstChunk) {
-  t_Chunk *chunkPtr = firstChunk;
+int convertToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
+  // First, we need to count the number of chunks
+  int chunkNumber = 0;
+  t_ChunkNode *chunkPtr = chunkList;
   while (chunkPtr != NULL) {
-    printf("Chunk - %s (%ld) of %ld lines (%ld to %ld)\n",
-           chunkPtr->fileName->fileName, chunkPtr->fileName->lineNumber,
-           (chunkPtr->endLine) - (chunkPtr->startLine) + 1, chunkPtr->startLine,
-           chunkPtr->endLine);
+    chunkNumber++;
     chunkPtr = chunkPtr->next;
+  }
+  *chunkArray = (t_Chunk *)calloc(chunkNumber, sizeof(t_Chunk));
+
+  // Conversione
+  chunkPtr = chunkList;
+  for (int i = 0; i < chunkNumber; i++) {
+    (*chunkArray)[i].fileName = chunkPtr->fileName->fileName;
+    (*chunkArray)[i].startLine = chunkPtr->startLine;
+    (*chunkArray)[i].endLine = chunkPtr->endLine;
+    chunkPtr = chunkPtr->next;
+  }
+  return chunkNumber;
+}
+
+void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
+  for (int i = 0; i < chunkNumber; i++) {
+    t_Chunk chunk = chunkArray[i];
+    printf("Chunk - %s of %ld lines (%ld to %ld)\n", chunk.fileName,
+           (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
+           chunk.endLine);
+  }
+}
+
+void prepareSendCountAndDispls(int *sendCounts, int *displs,
+                               t_Chunk *chunkArray, int chunkNumber,
+                               int totalLineNumber, int p) {
+  long int standardChunkSize = totalLineNumber / p;
+  int remainder = totalLineNumber % p;
+  long int nextChunkSize = standardChunkSize;
+  if (remainder > 0) {
+    nextChunkSize++;
+    remainder--;
+  }
+
+  // Prepare send count array
+  int chunkToSend = 0;
+  long int accumulatedChunkSize = 0;
+  int j = 0;
+  for (int i = 0; i < p; i++) {
+    // Accumulate the needed chunks
+    while (j < chunkNumber && accumulatedChunkSize < nextChunkSize) {
+      chunkToSend++;
+      accumulatedChunkSize +=
+          (chunkArray[i].endLine) - (chunkArray[i].startLine) + 1;
+      j++;
+    }
+    // This shouldn't happen. If yes, there is a bug to fix!
+    if (accumulatedChunkSize < nextChunkSize) {
+      fprintf(stderr, "Error: bad work splitting. Aborting\n");
+      return;
+    }
+    sendCounts[i] = chunkToSend;
+#ifdef DEBUG
+    printf("Process %d will receive %d chunk(s)\n", i, chunkToSend);
+#endif
+
+    // Prepare everything for next process
+    chunkToSend = 0;
+    accumulatedChunkSize = 0;
+    nextChunkSize = standardChunkSize;
+    if (remainder > 0) {
+      nextChunkSize++;
+      remainder--;
+    }
+  }
+
+  // Prepare displacement arrays
+  displs[0] = 0;
+  for (int i = 1; i < p; i++) {
+    displs[i] = sendCounts[i - 1] + displs[i - 1];
   }
 }
 
 int main(int argc, char *argv[]) {
   // Init phase
   int rank, p;
-
+  int *sendCount, *displs;
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &p);
@@ -239,25 +320,35 @@ int main(int argc, char *argv[]) {
 #endif
 
       // Prepare the chunk list
-      t_Chunk *chunkList =
+      t_ChunkNode *chunkList =
           buildChunkList(fileNames, fileNumber, totalLineNumber, p);
+
+      // Convert list into array because it is easier to scatter
+      t_Chunk *chunkArray;
+      int chunkNumber = convertToArray(&chunkArray, chunkList);
 
 #ifdef VERBOSE
       printf("\n");
-      printChunkList(chunkList);
+      printChunkArray(chunkArray, chunkNumber);
       printf("\n");
 #endif
-      // Prepare sendCounts and displs
 
-      // TODO Free whole chunkList at the end
+      // Prepare sendCounts and displs for the scatter
+      sendCount = (int *)calloc(p, sizeof(int));
+      displs = (int *)calloc(p, sizeof(int));
+      prepareSendCountAndDispls(sendCount, displs, chunkArray, chunkNumber,
+                                totalLineNumber, p);
+
+      // TODO Free everything in the end
       free(fileNames);
+      free(chunkArray);
     }
-    // Scatter sendCount values first
-
-    // Scatter the work files
-  } else {
-    
   }
+
+  // TODO Scatter sendCount values first. Reuse simple_word_count solution
+
+  // Scatter the work files
+
   MPI_Finalize();
   return 0;
 }
