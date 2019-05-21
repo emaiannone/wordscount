@@ -68,7 +68,7 @@ typedef struct Chunk {
 // fileNames will be an array pointer to a list of FileNames; the return value
 // is the file number
 int getFiles(t_FileName **fileNames) {
-  DIR *dir;
+  DIR *dir = NULL;
   dir = opendir(DEFAULT_FILE_LOCATION);
   if (dir == NULL) {
     return 0;
@@ -102,20 +102,22 @@ int getFiles(t_FileName **fileNames) {
       fileNamesPtr->fileName = (char *)malloc(FILE_NAME_SIZE);
       strcpy(fileNamesPtr->fileName, entry->d_name);
       fileNamesPtr->lineNumber = 0;
-      fileNamesPtr += sizeof(t_FileName);
+      fileNamesPtr++;
     }
   }
+  closedir(dir);
   return count;
 }
 
-int getLinesNumber(t_FileName *fileNames, int fileNumber) {
+long int getLinesNumber(t_FileName *fileNames, int fileNumber) {
   // Read all files using the fileNames
   t_FileName *fileNamesPtr = fileNames;
-  int totalLineNumber = 0;
+  long int totalLineNumber = 0;
   char *selectedFile;
   for (int i = 0; i < fileNumber; i++) {
-    char *fileFullName = (char *)malloc(strlen(DEFAULT_FILE_LOCATION) +
-                                        strlen(fileNamesPtr->fileName) + 1);
+    char *fileFullName = (char *)calloc(
+        strlen(DEFAULT_FILE_LOCATION) + strlen(fileNamesPtr->fileName) + 1,
+        sizeof(char));
     strcpy(fileFullName, DEFAULT_FILE_LOCATION);
     strcat(fileFullName, fileNamesPtr->fileName);
     printf("Opening file %s\n", fileFullName);
@@ -128,8 +130,9 @@ int getLinesNumber(t_FileName *fileNames, int fileNumber) {
         fileNamesPtr->lineNumber++;
         totalLineNumber++;
       }
+      fclose(fp);
     }
-    fileNamesPtr += sizeof(t_FileName);
+    fileNamesPtr++;
   }
   return totalLineNumber;
 }
@@ -137,19 +140,21 @@ int getLinesNumber(t_FileName *fileNames, int fileNumber) {
 void printLinesNumber(t_FileName *fileNames, int fileNumber) {
   t_FileName *fileNamesPtr = fileNames;
   for (int i = 0; i < fileNumber; i++) {
-    printf("File %s has %ld lines\n", fileNamesPtr->fileName,
+    printf("%s has %ld lines\n", fileNamesPtr->fileName,
            fileNamesPtr->lineNumber);
-    fileNamesPtr += sizeof(t_FileName);
+    fileNamesPtr++;
   }
 }
 
 t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
-                        int totalLineNumber, int p) {
+                        long int totalLineNumber, int p) {
   long int standardChunkSize = totalLineNumber / p;
 #ifdef DEBUG
   printf("Standard chunk size: %ld\n", standardChunkSize);
 #endif
   int remainder = totalLineNumber % p;
+
+  long int nextChunkSize = standardChunkSize;
   t_FileName *fileNamesPtr = fileNames;
   t_Chunk *firstChunkPtr = NULL, *chunkPtr = NULL;
   for (int i = 0; i < fileNumber; i++) {
@@ -160,30 +165,37 @@ t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
     while (leftLines > 0) {
       // New chunk for this file. If it is the first, it will be the head
       if (chunkPtr == NULL) {
-        chunkPtr = malloc(sizeof(t_Chunk));
+        chunkPtr = (t_Chunk *)malloc(sizeof(t_Chunk));
         firstChunkPtr = chunkPtr;
       } else {
-        t_Chunk *precChunkPtr = chunkPtr;
-        precChunkPtr->next = malloc(sizeof(t_Chunk));
-        chunkPtr = precChunkPtr->next;
+        chunkPtr->next = (t_Chunk *)malloc(sizeof(t_Chunk));
+        chunkPtr = chunkPtr->next;
       }
-      chunkPtr->fileName = malloc(sizeof(t_FileName));
       chunkPtr->fileName = fileNamesPtr;
       chunkPtr->startLine = lastLine + 1;
+      chunkPtr->next = NULL;
+      printf("New chunk for file %s (%ld)\n", chunkPtr->fileName->fileName,
+             chunkPtr->fileName->lineNumber);
 
       // Compute the amount of lines that can be used
-      long int chunkSize;
-      if (leftLines > standardChunkSize) {
-        chunkSize = standardChunkSize;
+      long int actualChunkSize;
+      printf("leftLines: %ld, nextChunkSize: %ld\n", leftLines, nextChunkSize);
+      if (leftLines >= nextChunkSize) {
+        actualChunkSize = nextChunkSize;
+        nextChunkSize = standardChunkSize;
       } else {
-        chunkSize = leftLines;
+        actualChunkSize = leftLines;
+        nextChunkSize -= leftLines;
       }
-      lastLine += chunkSize;
+      lastLine += actualChunkSize;
       chunkPtr->endLine = lastLine;
-      leftLines -= chunkSize;
+      leftLines -= actualChunkSize;
     }
     // Go to next file
-    fileNamesPtr += sizeof(t_FileName);
+    fileNamesPtr++;
+  }
+  if (nextChunkSize < standardChunkSize) {
+    printf("There are some unassigned lines...\n");
   }
   return firstChunkPtr;
 }
@@ -191,9 +203,9 @@ t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
 void printChunkList(t_Chunk *firstChunk) {
   t_Chunk *chunkPtr = firstChunk;
   while (chunkPtr != NULL) {
-    printf("Chunk - %s (%ld) of %ld line (%ld to %ld)\n",
+    printf("Chunk - %s (%ld) of %ld lines (%ld to %ld)\n",
            chunkPtr->fileName->fileName, chunkPtr->fileName->lineNumber,
-           chunkPtr->endLine - chunkPtr->startLine + 1, chunkPtr->startLine,
+           (chunkPtr->endLine) - (chunkPtr->startLine) + 1, chunkPtr->startLine,
            chunkPtr->endLine);
     chunkPtr = chunkPtr->next;
   }
@@ -210,30 +222,41 @@ int main(int argc, char *argv[]) {
   if (rank == 0) {
     // Fetch all files name and store them. Files are located in directory
     // "./files/", relative to the CWD (this is important in the readme)
-    t_FileName *fileNames;
+    t_FileName *fileNames = NULL;
     int fileNumber = getFiles(&fileNames);
     if (fileNames == NULL) {
       printf("No files detected. Aborted...\n");
     } else {
       // Read all files and get their line number
-      int totalLineNumber = getLinesNumber(fileNames, fileNumber);
+      long int totalLineNumber = getLinesNumber(fileNames, fileNumber);
+      printf("%ld\n", totalLineNumber);
+
 #ifdef DEBUG
+      printf("\n");
       printLinesNumber(fileNames, fileNumber);
-      printf("Total line number: %d\n", totalLineNumber);
+      printf("Total line number: %ld\n", totalLineNumber);
+      printf("\n");
 #endif
 
       // Prepare the chunk list
       t_Chunk *chunkList =
           buildChunkList(fileNames, fileNumber, totalLineNumber, p);
+
 #ifdef VERBOSE
+      printf("\n");
       printChunkList(chunkList);
+      printf("\n");
 #endif
       // Prepare sendCounts and displs
+
+      // TODO Free whole chunkList at the end
+      free(fileNames);
     }
     // Scatter sendCount values first
 
     // Scatter the work files
   } else {
+    
   }
   MPI_Finalize();
   return 0;
