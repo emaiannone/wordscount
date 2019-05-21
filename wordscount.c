@@ -22,6 +22,7 @@
     - After everything has been tested, insert the time profiling code.
     - Run some benchmarks in local and record everything in a file (not striclty
    required)
+    - Try to make the slaves read file lines instead of master only and compare
     - Make a script that launches the compilation and that launches the program
    multiple times, according to the strong and weak scalability requirements
    - Optionally, make different files, builded together with make. The make
@@ -45,7 +46,7 @@
 #define TAG 0
 #define TIME
 #define DEBUG
-//#define VERBOSE
+#define VERBOSE
 #define LINE_LIMIT 655535
 #define FILE_NAME_SIZE 256
 #define DEFAULT_FILE_LOCATION "./files/"
@@ -54,14 +55,15 @@
 
 typedef struct FileName {
   char *fileName;
-  int lineNumber;
+  long int lineNumber;
 } t_FileName;
 
-typedef struct WorkFile {
+typedef struct Chunk {
   t_FileName *fileName;
-  int startLine;
-  int endLine;
-} t_WorkFile;
+  long int startLine;
+  long int endLine;
+  struct Chunk *next;
+} t_Chunk;
 
 // fileNames will be an array pointer to a list of FileNames; the return value
 // is the file number
@@ -89,7 +91,7 @@ int getFiles(t_FileName **fileNames) {
   if (dir == NULL) {
     return 0;
   }
-  printf("File number: %d\n", count);
+  printf("Found %d files\n", count);
   *fileNames = (t_FileName *)calloc(count, sizeof(t_FileName));
 
   t_FileName *fileNamesPtr = *fileNames;
@@ -100,7 +102,6 @@ int getFiles(t_FileName **fileNames) {
       fileNamesPtr->fileName = (char *)malloc(FILE_NAME_SIZE);
       strcpy(fileNamesPtr->fileName, entry->d_name);
       fileNamesPtr->lineNumber = 0;
-      printf("Found file: %s\n", fileNamesPtr->fileName);
       fileNamesPtr += sizeof(t_FileName);
     }
   }
@@ -113,10 +114,11 @@ int getLinesNumber(t_FileName *fileNames, int fileNumber) {
   int totalLineNumber = 0;
   char *selectedFile;
   for (int i = 0; i < fileNumber; i++) {
-    char *fileFullName = malloc(strlen(DEFAULT_FILE_LOCATION) +
-                                strlen(fileNamesPtr->fileName) + 1);
-    strcat(fileFullName, DEFAULT_FILE_LOCATION);
+    char *fileFullName = (char *)malloc(strlen(DEFAULT_FILE_LOCATION) +
+                                        strlen(fileNamesPtr->fileName) + 1);
+    strcpy(fileFullName, DEFAULT_FILE_LOCATION);
     strcat(fileFullName, fileNamesPtr->fileName);
+    printf("Opening file %s\n", fileFullName);
     FILE *fp = fopen(fileFullName, "r");
     if (fp == NULL) {
       fprintf(stderr, "Error in opening file %s\n", fileNamesPtr->fileName);
@@ -135,26 +137,71 @@ int getLinesNumber(t_FileName *fileNames, int fileNumber) {
 void printLinesNumber(t_FileName *fileNames, int fileNumber) {
   t_FileName *fileNamesPtr = fileNames;
   for (int i = 0; i < fileNumber; i++) {
-    printf("File %s has %d lines\n", fileNamesPtr->fileName,
+    printf("File %s has %ld lines\n", fileNamesPtr->fileName,
            fileNamesPtr->lineNumber);
     fileNamesPtr += sizeof(t_FileName);
   }
 }
 
-// TODO Build the work files and the sendCount too?
-int buildWorkFiles(t_WorkFile **workFiles, t_FileName *fileNames,
-                   int fileNumber) {
+t_Chunk *buildChunkList(t_FileName *fileNames, int fileNumber,
+                        int totalLineNumber, int p) {
+  long int standardChunkSize = totalLineNumber / p;
+#ifdef DEBUG
+  printf("Standard chunk size: %ld\n", standardChunkSize);
+#endif
+  int remainder = totalLineNumber % p;
   t_FileName *fileNamesPtr = fileNames;
+  t_Chunk *firstChunkPtr = NULL, *chunkPtr = NULL;
   for (int i = 0; i < fileNumber; i++) {
-    // TODO Cose
+    // TODO Fix with remainder that increase the chunck Size by 1 for first
+    // remainder chuncks
+    long int lastLine = -1;
+    long int leftLines = fileNamesPtr->lineNumber;
+    while (leftLines > 0) {
+      // New chunk for this file. If it is the first, it will be the head
+      if (chunkPtr == NULL) {
+        chunkPtr = malloc(sizeof(t_Chunk));
+        firstChunkPtr = chunkPtr;
+      } else {
+        t_Chunk *precChunkPtr = chunkPtr;
+        precChunkPtr->next = malloc(sizeof(t_Chunk));
+        chunkPtr = precChunkPtr->next;
+      }
+      chunkPtr->fileName = malloc(sizeof(t_FileName));
+      chunkPtr->fileName = fileNamesPtr;
+      chunkPtr->startLine = lastLine + 1;
+
+      // Compute the amount of lines that can be used
+      long int chunkSize;
+      if (leftLines > standardChunkSize) {
+        chunkSize = standardChunkSize;
+      } else {
+        chunkSize = leftLines;
+      }
+      lastLine += chunkSize;
+      chunkPtr->endLine = lastLine;
+      leftLines -= chunkSize;
+    }
+    // Go to next file
     fileNamesPtr += sizeof(t_FileName);
+  }
+  return firstChunkPtr;
+}
+
+void printChunkList(t_Chunk *firstChunk) {
+  t_Chunk *chunkPtr = firstChunk;
+  while (chunkPtr != NULL) {
+    printf("Chunk - %s (%ld) of %ld line (%ld to %ld)\n",
+           chunkPtr->fileName->fileName, chunkPtr->fileName->lineNumber,
+           chunkPtr->endLine - chunkPtr->startLine + 1, chunkPtr->startLine,
+           chunkPtr->endLine);
+    chunkPtr = chunkPtr->next;
   }
 }
 
 int main(int argc, char *argv[]) {
   // Init phase
-  int rank, p, n;
-  int lines, globalCount;
+  int rank, p;
 
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -170,18 +217,23 @@ int main(int argc, char *argv[]) {
     } else {
       // Read all files and get their line number
       int totalLineNumber = getLinesNumber(fileNames, fileNumber);
-      printf("Total line number: %d\n", totalLineNumber);
+#ifdef DEBUG
       printLinesNumber(fileNames, fileNumber);
+      printf("Total line number: %d\n", totalLineNumber);
+#endif
 
-      // Prepare the work files
-      t_WorkFile *workFiles;
-      int workFilesNumber = buildWorkFiles(&workFiles, fileNames, fileNumber);
-
+      // Prepare the chunk list
+      t_Chunk *chunkList =
+          buildChunkList(fileNames, fileNumber, totalLineNumber, p);
+#ifdef VERBOSE
+      printChunkList(chunkList);
+#endif
       // Prepare sendCounts and displs
     }
     // Scatter sendCount values first
 
     // Scatter the work files
+  } else {
   }
   MPI_Finalize();
   return 0;
