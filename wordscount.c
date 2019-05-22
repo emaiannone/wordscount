@@ -9,8 +9,9 @@
    number of lines. Say we have 4 processes, each of them should work on 250
    lines, but they are distributed differenly in the files.
     + Master prepares sendCount and displs
-    - Master scatters sendCount
-    - Master scatters the chunks
+    + Master scatters sendCount
+    + Each process create and commit the custom datatype
+    + Master scatters the chunks
     - Each process launch the wordsCount function on each file, according to its
    work range. wordsCount access the file according to the given name and fetch
    all work lines. wordsCount return an array of structs like this: (word string
@@ -54,7 +55,7 @@
 // TODO Creare una struttura fatta da nome file e intero numero linee
 
 typedef struct FileName {
-  char *fileName;
+  char fileName[FILE_NAME_SIZE];
   long int lineNumber;
 } t_FileName;
 
@@ -66,7 +67,7 @@ typedef struct ChunkNode {
 } t_ChunkNode;
 
 typedef struct Chunk {
-  char *fileName;
+  char fileName[FILE_NAME_SIZE];
   long int startLine;
   long int endLine;
 } t_Chunk;
@@ -105,7 +106,6 @@ int getFiles(t_FileName **fileNames) {
     // Only for files
     if (entry->d_type != DT_DIR) {
       // Initialization of the struct
-      fileNamesPtr->fileName = (char *)malloc(FILE_NAME_SIZE);
       strcpy(fileNamesPtr->fileName, entry->d_name);
       fileNamesPtr->lineNumber = 0;
       fileNamesPtr++;
@@ -225,7 +225,7 @@ int convertToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
   // Conversione
   chunkPtr = chunkList;
   for (int i = 0; i < chunkNumber; i++) {
-    (*chunkArray)[i].fileName = chunkPtr->fileName->fileName;
+    strcpy((*chunkArray)[i].fileName, chunkPtr->fileName->fileName);
     (*chunkArray)[i].startLine = chunkPtr->startLine;
     (*chunkArray)[i].endLine = chunkPtr->endLine;
     chunkPtr = chunkPtr->next;
@@ -236,7 +236,7 @@ int convertToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
 void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
   for (int i = 0; i < chunkNumber; i++) {
     t_Chunk chunk = chunkArray[i];
-    printf("Chunk - %s of %ld lines (%ld to %ld)\n", chunk.fileName,
+    printf("Chunk - %s of %ld lines (%ld to %ld); ", chunk.fileName,
            (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
            chunk.endLine);
   }
@@ -271,9 +271,6 @@ void prepareSendCountAndDispls(int *sendCounts, int *displs,
       return;
     }
     sendCounts[i] = chunkToSend;
-#ifdef DEBUG
-    printf("Process %d will receive %d chunk(s)\n", i, chunkToSend);
-#endif
 
     // Prepare everything for next process
     chunkToSend = 0;
@@ -285,25 +282,48 @@ void prepareSendCountAndDispls(int *sendCounts, int *displs,
     }
   }
 
-  // Prepare displacement arrays
+// Prepare displacement arrays
+#ifdef VERBOSE
+  printf("displs array:\n");
+#endif
   displs[0] = 0;
   for (int i = 1; i < p; i++) {
     displs[i] = sendCounts[i - 1] + displs[i - 1];
+#ifdef VERBOSE
+    printf("dipls[%d]: %d\n", i, displs[i]);
+#endif
   }
+#ifdef VERBOSE
+  printf("\n");
+#endif
+}
+
+void createChunkDatatype(MPI_Datatype *newDatatype) {
+  int blockNumber = 3;
+  int blockLengths[] = {FILE_NAME_SIZE, 1, 1};
+  long int displs[] = {0, FILE_NAME_SIZE, FILE_NAME_SIZE + 8};
+  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T, MPI_INT64_T};
+  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
+  MPI_Type_commit(newDatatype);
 }
 
 int main(int argc, char *argv[]) {
-  // Init phase
   int rank, p;
+  t_FileName *fileNames;
+  t_Chunk *chunkArray;
   int *sendCount, *displs;
+  MPI_Datatype MPI_T_CHUNK;
+
+  // Init phase
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &p);
 
+  // Master preprocessing
   if (rank == 0) {
     // Fetch all files name and store them. Files are located in directory
     // "./files/", relative to the CWD (this is important in the readme)
-    t_FileName *fileNames = NULL;
+    fileNames = NULL;
     int fileNumber = getFiles(&fileNames);
     if (fileNames == NULL) {
       printf("No files detected. Aborted...\n");
@@ -323,14 +343,20 @@ int main(int argc, char *argv[]) {
       t_ChunkNode *chunkList =
           buildChunkList(fileNames, fileNumber, totalLineNumber, p);
 
+      // TODO Is this conversion necessary? MPI_Type_create_hindexed()?
+
+      // Aggiungere nel readme: si è valutato l'uso della lista con un uso
+      // intelligente di displs, tuttavia nel momento in cui unprocesso doveva
+      // ricere due o più chunk li avrebbe presi sequenzialmente, accedendo ad
+      // aree non allocate
+
       // Convert list into array because it is easier to scatter
-      t_Chunk *chunkArray;
       int chunkNumber = convertToArray(&chunkArray, chunkList);
 
 #ifdef VERBOSE
-      printf("\n");
+      printf("\nMaster will send these chunks: ");
       printChunkArray(chunkArray, chunkNumber);
-      printf("\n");
+      printf("\n\n");
 #endif
 
       // Prepare sendCounts and displs for the scatter
@@ -338,16 +364,50 @@ int main(int argc, char *argv[]) {
       displs = (int *)calloc(p, sizeof(int));
       prepareSendCountAndDispls(sendCount, displs, chunkArray, chunkNumber,
                                 totalLineNumber, p);
-
-      // TODO Free everything in the end
-      free(fileNames);
-      free(chunkArray);
     }
   }
 
-  // TODO Scatter sendCount values first. Reuse simple_word_count solution
+  // Scatters the sendCounts so that each process knows how many data expects
+  int myChunkNumber;
+  MPI_Scatter(sendCount, 1, MPI_INT, &myChunkNumber, 1, MPI_INT, 0,
+              MPI_COMM_WORLD);
 
-  // Scatter the work files
+  // TODO Manage the custom MPI datatype
+  createChunkDatatype(&MPI_T_CHUNK);
+
+#ifdef DEBUG
+  if (rank == 0) {
+    int size;
+    MPI_Type_size(MPI_T_CHUNK, &size);
+    printf("The new datatype will be %d bytes long\n", size);
+  }
+#endif
+
+  // Scatter the chunks
+  t_Chunk *myChunks = (t_Chunk *)calloc(myChunkNumber, sizeof(t_Chunk));
+  MPI_Scatterv(chunkArray, sendCount, displs, MPI_T_CHUNK, myChunks,
+               myChunkNumber, MPI_T_CHUNK, 0, MPI_COMM_WORLD);
+
+#ifdef DEBUG
+  printf("Process %d has received: ", rank);
+  printChunkArray(myChunks, myChunkNumber);
+  printf("\n");
+#endif
+
+  // TODO Launch wordcounts procedure on each myChunks
+
+  // TODO Reduce
+
+  // TODO Free everything in the end
+  /*
+  MPI_Type_free(&MPI_T_CHUNK);
+  if (rank == 0) {
+    free(fileNames);
+    free(chunkArray);
+    free(sendCount);
+    free(displs);
+  }
+  */
 
   MPI_Finalize();
   return 0;
