@@ -2,6 +2,7 @@
     + Hypothesis 1: Each process sees the same files on the disk
     + Hypothesis 2: Each file has a single word per line (this constraint can be
    optionally relaxed)
+   --- Part 1: Core algorithm---
     + Master fetch all files name and stores them.
     + Master reads all files, and get each lines number
     + Master reads all files, and get TOTAL lines number, say 1000.
@@ -12,29 +13,34 @@
     + Master scatters sendCount
     + Each process create and commit the custom datatype
     + Master scatters the chunks
-    - Each process launch the wordsCount function on each file, according to its
-   work range. wordsCount access the file according to the given name and fetch
-   all work lines. wordsCount return an array of structs like this: (word string
-   - occurances)
-    - Among all the calls a process made, it should merge all the returned
-   structs, creating a single array of structs. Then it sends back to the master
-    - Master receive all data and call a custom reduce function that is the
-   same merging function used by each process.
+    + Each process launches the wordsCount function its chunks, according to
+   its work range. wordsCount access the file according to the given name and
+   fetch all work lines. wordsCount return an list of structs like this: (word
+   string - occurances)
+    - Master receive all data and call a custom reduce function that merges the
+   results of each process.
+   --- Part 2: Local Beanchmark---
     - After everything has been tested, insert the time profiling code.
-    - Run some benchmarks in local and record everything in a file (not striclty
-   required)
-    - Try to make the slaves read file lines instead of master only and compare
+    - Run some benchmarks in local and write down these data into a file (not
+   striclty required)
+   --- Part 3: Building---
     - Make a script that launches the compilation and that launches the program
    multiple times, according to the strong and weak scalability requirements
    - Optionally, make different files, builded together with make. The make
    launch is done in the script
-    - Run some benchmarks on EC2 instances and record everything in a file
-   (strinctly required)
+   --- Part 4: Cloud Benchmark---
     - Make another similar script that setups the whole cloud environment
+    - Run some benchmarks on EC2 instances
+   --- Part 5: Beanchmark Graph---
     - With the cloud benchmark file, make a Python script that plots the results
    according to the requirements
+   --- Part 6: Pack everything---
     - Make a readme that summarizes: the problem, all the choices and rationale,
-   all the necessary setup and consideration about benchmarks
+   all the necessary setup and consideration about benchmarks.
+    - Put everything needed in a tar archive.
+   ---Optional---
+    - Try to make the slaves read file lines instead of master only and
+   compare
 */
 
 #include <ctype.h>
@@ -48,11 +54,11 @@
 #define TIME
 #define DEBUG
 #define VERBOSE
-#define LINE_LIMIT 655535
+#define LINE_LIMIT 65535
 #define FILE_NAME_SIZE 256
 #define DEFAULT_FILE_LOCATION "./files/"
 
-// TODO Creare una struttura fatta da nome file e intero numero linee
+// TODO SIstema queste strutture con alcune più intelligenti
 
 typedef struct FileName {
   char fileName[FILE_NAME_SIZE];
@@ -71,6 +77,17 @@ typedef struct Chunk {
   long int startLine;
   long int endLine;
 } t_Chunk;
+
+// Nel readme dire che l'uso di una hashmap sarebbe ottimale
+typedef struct Word {
+  char word[LINE_LIMIT];
+  long int occurances;
+} t_Word;
+
+typedef struct WordNode {
+  t_Word word;
+  struct WordNode *next;
+} t_WordNode;
 
 // fileNames will be an array pointer to a list of FileNames; the return value
 // is the file number
@@ -156,7 +173,8 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
                             long int totalLineNumber, int p) {
   long int standardChunkSize = totalLineNumber / p;
 #ifdef DEBUG
-  printf("Standard chunk size: %ld\n", standardChunkSize);
+  printf("Each process should work on roughtly: %ld lines\n",
+         standardChunkSize);
 #endif
   int remainder = totalLineNumber % p;
 
@@ -182,12 +200,18 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
       chunkPtr->fileName = fileNamesPtr;
       chunkPtr->startLine = lastLine + 1;
       chunkPtr->next = NULL;
-      printf("New chunk for file %s (%ld)\n", chunkPtr->fileName->fileName,
-             chunkPtr->fileName->lineNumber);
 
       // Compute the amount of lines that can be used
       long int actualChunkSize;
-      printf("leftLines: %ld, nextChunkSize: %ld\n", leftLines, nextChunkSize);
+
+#ifdef VERBOSE
+      printf("Created a chunk for file %s (%ld)\n",
+             chunkPtr->fileName->fileName, chunkPtr->fileName->lineNumber);
+      printf(
+          "There are %ld lines in file %s. Next chunk will have %ld "
+          "lines\n",
+          leftLines, chunkPtr->fileName->fileName, nextChunkSize);
+#endif
       if (leftLines >= nextChunkSize) {
         actualChunkSize = nextChunkSize;
         nextChunkSize = standardChunkSize;
@@ -236,7 +260,7 @@ int convertToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
 void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
   for (int i = 0; i < chunkNumber; i++) {
     t_Chunk chunk = chunkArray[i];
-    printf("Chunk - %s of %ld lines (%ld to %ld); ", chunk.fileName,
+    printf("Chunk{%s of %ld lines (%ld to %ld)}; ", chunk.fileName,
            (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
            chunk.endLine);
   }
@@ -282,11 +306,12 @@ void prepareSendCountAndDispls(int *sendCounts, int *displs,
     }
   }
 
-// Prepare displacement arrays
+  // Prepare displacement arrays
+  displs[0] = 0;
 #ifdef VERBOSE
   printf("displs array:\n");
+  printf("dipls[%d]: %d\n", 0, displs[0]);
 #endif
-  displs[0] = 0;
   for (int i = 1; i < p; i++) {
     displs[i] = sendCounts[i - 1] + displs[i - 1];
 #ifdef VERBOSE
@@ -305,6 +330,67 @@ void createChunkDatatype(MPI_Datatype *newDatatype) {
   MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T, MPI_INT64_T};
   MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
   MPI_Type_commit(newDatatype);
+}
+
+long int wordscount(t_WordNode **histogram, t_Chunk *myChunks,
+                    int myChunkNumber) {
+  *histogram = NULL;
+  long int countedWords = 0;
+  char wordBuf[LINE_LIMIT];
+
+  for (int i = 0; i < myChunkNumber; i++) {
+    // File opening
+    char *fileFullName = (char *)calloc(
+        strlen(DEFAULT_FILE_LOCATION) + strlen(myChunks[i].fileName) + 1,
+        sizeof(char));
+    strcpy(fileFullName, DEFAULT_FILE_LOCATION);
+    strcat(fileFullName, myChunks[i].fileName);
+    FILE *fp = fopen(fileFullName, "r");
+
+    // Add offset according to start line
+    for (int j = 0; j < myChunks[i].startLine; j++) {
+      fgets(wordBuf, LINE_LIMIT, fp);
+    }
+
+    // Terminate when every lines has been counter or file ends
+    int wordsFile = myChunks[i].endLine - myChunks[i].startLine + 1;
+    for (int j = 0; j < wordsFile && fgets(wordBuf, LINE_LIMIT, fp) != NULL;
+         j++) {
+      // Replace \n with \0 in order to have fewer chars
+      int wordLength = strlen(wordBuf);
+      if (*(wordBuf + wordLength - 1) == '\n') {
+        *(wordBuf + wordLength - 1) = '\0';
+      }
+
+      // Look for the read word in the histogram. If present, increase
+      // occurences, otherwise append a new node
+      if (*histogram == NULL) {
+        *histogram = (t_WordNode *)malloc(sizeof(t_WordNode));
+        strcpy((*histogram)->word.word, wordBuf);
+        (*histogram)->word.occurances = 1;
+        (*histogram)->next = NULL;
+      } else {
+        t_WordNode *wordNodePtr = *histogram;
+        while (strcmp(wordNodePtr->word.word, wordBuf) != 0 &&
+               wordNodePtr->next != NULL) {
+          wordNodePtr = wordNodePtr->next;
+        }
+        if (strcmp(wordNodePtr->word.word, wordBuf) != 0) {  // Not found
+          wordNodePtr->next = (t_WordNode *)malloc(sizeof(t_WordNode));
+          wordNodePtr = wordNodePtr->next;
+          strcpy(wordNodePtr->word.word, wordBuf);
+          wordNodePtr->word.occurances = 1;
+          wordNodePtr->next = NULL;
+        } else {  // Found
+          wordNodePtr->word.occurances++;
+        }
+      }
+    }
+    fclose(fp);
+    free(fileFullName);
+    countedWords += wordsFile;
+  }
+  return countedWords;
 }
 
 int main(int argc, char *argv[]) {
@@ -372,7 +458,7 @@ int main(int argc, char *argv[]) {
   MPI_Scatter(sendCount, 1, MPI_INT, &myChunkNumber, 1, MPI_INT, 0,
               MPI_COMM_WORLD);
 
-  // TODO Manage the custom MPI datatype
+  // Manage the custom MPI datatype
   createChunkDatatype(&MPI_T_CHUNK);
 
 #ifdef DEBUG
@@ -389,12 +475,27 @@ int main(int argc, char *argv[]) {
                myChunkNumber, MPI_T_CHUNK, 0, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-  printf("Process %d has received: ", rank);
+  printf("\nProcess %d has received: ", rank);
   printChunkArray(myChunks, myChunkNumber);
-  printf("\n");
 #endif
 
-  // TODO Launch wordcounts procedure on each myChunks
+  // Each process launches wordcounts procedure on its chunks
+  t_WordNode *histogram;
+  long int countedWords = wordscount(&histogram, myChunks, myChunkNumber);
+
+#ifdef DEBUG
+  printf("\nProcess %d counted %ld words\n", rank, countedWords);
+#endif
+#ifdef VERBOSE
+  t_WordNode *wordNodePtr = histogram;
+  while (wordNodePtr != NULL) {
+    printf("Process %d counted \"%s\" for %ld times\n", rank,
+           wordNodePtr->word.word, wordNodePtr->word.occurances);
+    wordNodePtr = wordNodePtr->next;
+  }
+#endif
+
+  // TODO Convert Words list into an array?
 
   // TODO Reduce
 
