@@ -9,7 +9,7 @@
     + Master make the chunks, so that each process receive an equal
    number of lines. Say we have 4 processes, each of them should work on 250
    lines, but they are distributed differenly in the files.
-    + Master prepares sendCount and displs
+    + Master prepares sendCount and sendDispls
     + Master scatters sendCount
     + Each process create and commit the custom datatype
     + Master scatters the chunks
@@ -17,12 +17,12 @@
    its work range. wordsCount access the file according to the given name and
    fetch all work lines. wordsCount return an list of structs like this: (word
    string - occurances)
-    - Master receive all data and call a custom reduce function that merges the
+    + Master receive all data and call a custom reduce function that merges the
    results of each process.
+    + Master prints all the results
    --- Part 2: Local Beanchmark---
     - After everything has been tested, insert the time profiling code.
-    - Run some benchmarks in local and write down these data into a file (not
-   striclty required)
+    - Run some benchmarks in local and write down these data into a file
    --- Part 3: Building---
     - Make a script that launches the compilation and that launches the program
    multiple times, according to the strong and weak scalability requirements
@@ -54,7 +54,7 @@
 #define TIME
 #define DEBUG
 #define VERBOSE
-#define LINE_LIMIT 65535
+#define LINE_LIMIT 1024
 #define FILE_NAME_SIZE 256
 #define DEFAULT_FILE_LOCATION "./files/"
 
@@ -184,33 +184,33 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
     remainder--;
   }
   t_FileName *fileNamesPtr = fileNames;
-  t_ChunkNode *firstChunkPtr = NULL, *chunkPtr = NULL;
+  t_ChunkNode *firstChunkPtr = NULL, *wordPtr = NULL;
   for (int i = 0; i < fileNumber; i++) {
     long int lastLine = -1;
     long int leftLines = fileNamesPtr->lineNumber;
     while (leftLines > 0) {
       // New chunk for this file. If it is the first, it will be the head
-      if (chunkPtr == NULL) {
-        chunkPtr = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
-        firstChunkPtr = chunkPtr;
+      if (wordPtr == NULL) {
+        wordPtr = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
+        firstChunkPtr = wordPtr;
       } else {
-        chunkPtr->next = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
-        chunkPtr = chunkPtr->next;
+        wordPtr->next = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
+        wordPtr = wordPtr->next;
       }
-      chunkPtr->fileName = fileNamesPtr;
-      chunkPtr->startLine = lastLine + 1;
-      chunkPtr->next = NULL;
+      wordPtr->fileName = fileNamesPtr;
+      wordPtr->startLine = lastLine + 1;
+      wordPtr->next = NULL;
 
       // Compute the amount of lines that can be used
       long int actualChunkSize;
 
 #ifdef VERBOSE
-      printf("Created a chunk for file %s (%ld)\n",
-             chunkPtr->fileName->fileName, chunkPtr->fileName->lineNumber);
+      printf("Created a chunk for file %s (%ld)\n", wordPtr->fileName->fileName,
+             wordPtr->fileName->lineNumber);
       printf(
           "There are %ld lines in file %s. Next chunk will have %ld "
           "lines\n",
-          leftLines, chunkPtr->fileName->fileName, nextChunkSize);
+          leftLines, wordPtr->fileName->fileName, nextChunkSize);
 #endif
       if (leftLines >= nextChunkSize) {
         actualChunkSize = nextChunkSize;
@@ -224,7 +224,7 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
         nextChunkSize -= leftLines;
       }
       lastLine += actualChunkSize;
-      chunkPtr->endLine = lastLine;
+      wordPtr->endLine = lastLine;
       leftLines -= actualChunkSize;
     }
     // Go to next file
@@ -236,23 +236,23 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
   return firstChunkPtr;
 }
 
-int convertToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
+int chunksToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
   // First, we need to count the number of chunks
   int chunkNumber = 0;
-  t_ChunkNode *chunkPtr = chunkList;
-  while (chunkPtr != NULL) {
+  t_ChunkNode *wordPtr = chunkList;
+  while (wordPtr != NULL) {
     chunkNumber++;
-    chunkPtr = chunkPtr->next;
+    wordPtr = wordPtr->next;
   }
   *chunkArray = (t_Chunk *)calloc(chunkNumber, sizeof(t_Chunk));
 
-  // Conversione
-  chunkPtr = chunkList;
+  // Conversion
+  wordPtr = chunkList;
   for (int i = 0; i < chunkNumber; i++) {
-    strcpy((*chunkArray)[i].fileName, chunkPtr->fileName->fileName);
-    (*chunkArray)[i].startLine = chunkPtr->startLine;
-    (*chunkArray)[i].endLine = chunkPtr->endLine;
-    chunkPtr = chunkPtr->next;
+    strcpy((*chunkArray)[i].fileName, wordPtr->fileName->fileName);
+    (*chunkArray)[i].startLine = wordPtr->startLine;
+    (*chunkArray)[i].endLine = wordPtr->endLine;
+    wordPtr = wordPtr->next;
   }
   return chunkNumber;
 }
@@ -266,7 +266,7 @@ void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
   }
 }
 
-void prepareSendCountAndDispls(int *sendCounts, int *displs,
+void prepareSendCountAndDispls(int *sendCounts, int *sendDispls,
                                t_Chunk *chunkArray, int chunkNumber,
                                int totalLineNumber, int p) {
   long int standardChunkSize = totalLineNumber / p;
@@ -307,19 +307,19 @@ void prepareSendCountAndDispls(int *sendCounts, int *displs,
   }
 
   // Prepare displacement arrays
-  displs[0] = 0;
+  sendDispls[0] = 0;
 #ifdef VERBOSE
-  printf("displs array:\n");
-  printf("dipls[%d]: %d\n", 0, displs[0]);
+  printf("sendDispls: ");
+  printf("%d, ", sendDispls[0]);
 #endif
   for (int i = 1; i < p; i++) {
-    displs[i] = sendCounts[i - 1] + displs[i - 1];
+    sendDispls[i] = sendCounts[i - 1] + sendDispls[i - 1];
 #ifdef VERBOSE
-    printf("dipls[%d]: %d\n", i, displs[i]);
+    printf("%d, ", sendDispls[i]);
 #endif
   }
 #ifdef VERBOSE
-  printf("\n");
+  printf("\n\n");
 #endif
 }
 
@@ -332,9 +332,18 @@ void createChunkDatatype(MPI_Datatype *newDatatype) {
   MPI_Type_commit(newDatatype);
 }
 
-long int wordscount(t_WordNode **histogram, t_Chunk *myChunks,
+void createWordDatatype(MPI_Datatype *newDatatype) {
+  int blockNumber = 2;
+  int blockLengths[] = {LINE_LIMIT, 1};
+  long int displs[] = {0, LINE_LIMIT};
+  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T};
+  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
+  MPI_Type_commit(newDatatype);
+}
+
+long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
                     int myChunkNumber) {
-  *histogram = NULL;
+  *myHistogramList = NULL;
   long int countedWords = 0;
   char wordBuf[LINE_LIMIT];
 
@@ -362,15 +371,15 @@ long int wordscount(t_WordNode **histogram, t_Chunk *myChunks,
         *(wordBuf + wordLength - 1) = '\0';
       }
 
-      // Look for the read word in the histogram. If present, increase
+      // Look for the read word in the myHistogramList. If present, increase
       // occurences, otherwise append a new node
-      if (*histogram == NULL) {
-        *histogram = (t_WordNode *)malloc(sizeof(t_WordNode));
-        strcpy((*histogram)->word.word, wordBuf);
-        (*histogram)->word.occurances = 1;
-        (*histogram)->next = NULL;
+      if (*myHistogramList == NULL) {
+        *myHistogramList = (t_WordNode *)malloc(sizeof(t_WordNode));
+        strcpy((*myHistogramList)->word.word, wordBuf);
+        (*myHistogramList)->word.occurances = 1;
+        (*myHistogramList)->next = NULL;
       } else {
-        t_WordNode *wordNodePtr = *histogram;
+        t_WordNode *wordNodePtr = *myHistogramList;
         while (strcmp(wordNodePtr->word.word, wordBuf) != 0 &&
                wordNodePtr->next != NULL) {
           wordNodePtr = wordNodePtr->next;
@@ -393,17 +402,88 @@ long int wordscount(t_WordNode **histogram, t_Chunk *myChunks,
   return countedWords;
 }
 
+int wordsToArray(t_Word **wordArray, t_WordNode *wordList) {
+  // First, we need to count the number of words
+  int chunkNumber = 0;
+  t_WordNode *wordPtr = wordList;
+  while (wordPtr != NULL) {
+    chunkNumber++;
+    wordPtr = wordPtr->next;
+  }
+  *wordArray = (t_Word *)calloc(chunkNumber, sizeof(t_Word));
+
+  // Conversione
+  wordPtr = wordList;
+  for (int i = 0; i < chunkNumber; i++) {
+    (*wordArray)[i] = wordPtr->word;
+    wordPtr = wordPtr->next;
+  }
+  return chunkNumber;
+}
+
+void compactHistogram(t_WordNode **finalHistogramList,
+                      t_Word *extendedHistogramArray, int extendedWordNumber) {
+  t_WordNode *finalHistogramPtr;
+  for (int i = 0; i < extendedWordNumber; i++) {
+    // There are no words yet
+    if (*finalHistogramList == NULL) {
+      *finalHistogramList = malloc(sizeof(t_WordNode));
+      strcpy((*finalHistogramList)->word.word, extendedHistogramArray[i].word);
+      (*finalHistogramList)->word.occurances =
+          extendedHistogramArray[i].occurances;
+      (*finalHistogramList)->next = NULL;
+    } else {
+      // Look if this word already exist
+      finalHistogramPtr = *finalHistogramList;
+      while (strcmp(finalHistogramPtr->word.word,
+                    extendedHistogramArray[i].word) != 0 &&
+             finalHistogramPtr->next != NULL) {
+        finalHistogramPtr = finalHistogramPtr->next;
+      }
+      // Not found
+      if (strcmp(finalHistogramPtr->word.word,
+                 extendedHistogramArray[i].word) != 0) {
+        finalHistogramPtr->next = malloc(sizeof(t_WordNode));
+        finalHistogramPtr = finalHistogramPtr->next;
+        strcpy(finalHistogramPtr->word.word, extendedHistogramArray[i].word);
+        finalHistogramPtr->word.occurances =
+            extendedHistogramArray[i].occurances;
+        finalHistogramPtr->next = NULL;
+      } else {
+        finalHistogramPtr->word.occurances +=
+            extendedHistogramArray[i].occurances;
+      }
+    }
+  }
+}
+
 int main(int argc, char *argv[]) {
   int rank, p;
   t_FileName *fileNames;
   t_Chunk *chunkArray;
-  int *sendCount, *displs;
-  MPI_Datatype MPI_T_CHUNK;
+  int *sendCount, *recvCounts, *sendDispls, *recvDispls;
+  t_Word *extendedHistogramArray;
+  int extendedWordNumber;
+  MPI_Datatype MPI_T_CHUNK, MPI_T_WORD;
 
   // Init phase
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &p);
+
+  // Create the custom MPI datatypes
+  createChunkDatatype(&MPI_T_CHUNK);
+  createWordDatatype(&MPI_T_WORD);
+
+#ifdef DEBUG
+  if (rank == 0) {
+    int size;
+    MPI_Type_size(MPI_T_CHUNK, &size);
+    printf("MPI_T_CHUNK will be %d bytes long\n", size);
+    MPI_Type_size(MPI_T_WORD, &size);
+    printf("MPI_T_WORD will be %d bytes long\n", size);
+  }
+#endif
 
   // Master preprocessing
   if (rank == 0) {
@@ -432,12 +512,12 @@ int main(int argc, char *argv[]) {
       // TODO Is this conversion necessary? MPI_Type_create_hindexed()?
 
       // Aggiungere nel readme: si è valutato l'uso della lista con un uso
-      // intelligente di displs, tuttavia nel momento in cui unprocesso doveva
-      // ricere due o più chunk li avrebbe presi sequenzialmente, accedendo ad
-      // aree non allocate
+      // intelligente di sendDispls, tuttavia nel momento in cui unprocesso
+      // doveva ricere due o più chunk li avrebbe presi sequenzialmente,
+      // accedendo ad aree non allocate
 
       // Convert list into array because it is easier to scatter
-      int chunkNumber = convertToArray(&chunkArray, chunkList);
+      int chunkNumber = chunksToArray(&chunkArray, chunkList);
 
 #ifdef VERBOSE
       printf("\nMaster will send these chunks: ");
@@ -445,10 +525,10 @@ int main(int argc, char *argv[]) {
       printf("\n\n");
 #endif
 
-      // Prepare sendCounts and displs for the scatter
+      // Prepare sendCounts and sendDispls for the scatter
       sendCount = (int *)calloc(p, sizeof(int));
-      displs = (int *)calloc(p, sizeof(int));
-      prepareSendCountAndDispls(sendCount, displs, chunkArray, chunkNumber,
+      sendDispls = (int *)calloc(p, sizeof(int));
+      prepareSendCountAndDispls(sendCount, sendDispls, chunkArray, chunkNumber,
                                 totalLineNumber, p);
     }
   }
@@ -458,36 +538,25 @@ int main(int argc, char *argv[]) {
   MPI_Scatter(sendCount, 1, MPI_INT, &myChunkNumber, 1, MPI_INT, 0,
               MPI_COMM_WORLD);
 
-  // Manage the custom MPI datatype
-  createChunkDatatype(&MPI_T_CHUNK);
-
-#ifdef DEBUG
-  if (rank == 0) {
-    int size;
-    MPI_Type_size(MPI_T_CHUNK, &size);
-    printf("The new datatype will be %d bytes long\n", size);
-  }
-#endif
-
   // Scatter the chunks
   t_Chunk *myChunks = (t_Chunk *)calloc(myChunkNumber, sizeof(t_Chunk));
-  MPI_Scatterv(chunkArray, sendCount, displs, MPI_T_CHUNK, myChunks,
+  MPI_Scatterv(chunkArray, sendCount, sendDispls, MPI_T_CHUNK, myChunks,
                myChunkNumber, MPI_T_CHUNK, 0, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-  printf("\nProcess %d has received: ", rank);
+  printf("\nProcess %d received: ", rank);
   printChunkArray(myChunks, myChunkNumber);
 #endif
 
   // Each process launches wordcounts procedure on its chunks
-  t_WordNode *histogram;
-  long int countedWords = wordscount(&histogram, myChunks, myChunkNumber);
+  t_WordNode *myHistogramList;
+  long int countedWords = wordscount(&myHistogramList, myChunks, myChunkNumber);
 
 #ifdef DEBUG
   printf("\nProcess %d counted %ld words\n", rank, countedWords);
 #endif
 #ifdef VERBOSE
-  t_WordNode *wordNodePtr = histogram;
+  t_WordNode *wordNodePtr = myHistogramList;
   while (wordNodePtr != NULL) {
     printf("Process %d counted \"%s\" for %ld times\n", rank,
            wordNodePtr->word.word, wordNodePtr->word.occurances);
@@ -495,9 +564,92 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
-  // TODO Convert Words list into an array?
+  // Convert histogram list into an array
+  t_Word *myHistogramArray;
+  int myWordNumber = wordsToArray(&myHistogramArray, myHistogramList);
 
-  // TODO Reduce
+#ifdef VERBOSE
+  printf("Process %d has this histogram: ", rank);
+  for (int i = 0; i < myWordNumber; i++) {
+    printf("%s(%ld); ", myHistogramArray[i].word,
+           myHistogramArray[i].occurances);
+  }
+  printf("\n\n");
+#endif
+
+  // Gather all wordNumbers
+  if (rank == 0) {
+    recvCounts = (int *)calloc(p, sizeof(int));
+    recvDispls = (int *)calloc(p, sizeof(int));
+  }
+  MPI_Gather(&myWordNumber, 1, MPI_INT, recvCounts, 1, MPI_INT, 0,
+             MPI_COMM_WORLD);
+
+  if (rank == 0) {
+#ifdef VERBOSE
+    printf("recvCounts: ");
+    for (int i = 0; i < p; i++) {
+      printf("%d, ", recvCounts[i]);
+    }
+    printf("\n");
+#endif
+
+    // TODO Questa creazione può essere messe in una
+    // funzione a parte dato che è fatta ugualmente anche in un altro caso
+    recvDispls[0] = 0;
+#ifdef VERBOSE
+    printf("recvDispls: ");
+    printf("%d, ", recvDispls[0]);
+#endif
+    for (int i = 1; i < p; i++) {
+      recvDispls[i] = recvCounts[i - 1] + recvDispls[i - 1];
+#ifdef VERBOSE
+      printf("%d, ", recvDispls[i]);
+#endif
+    }
+#ifdef VERBOSE
+    printf("\n\n");
+#endif
+
+    // Sum recvCounts for the size of extendedHistogramArray
+    extendedWordNumber = 0;
+    for (int i = 0; i < p; i++) {
+      extendedWordNumber += recvCounts[i];
+    }
+
+    extendedHistogramArray =
+        (t_Word *)calloc(extendedWordNumber, sizeof(t_Word));
+  }
+
+  // Gather all histograms
+  MPI_Gatherv(myHistogramArray, myWordNumber, MPI_T_WORD,
+              extendedHistogramArray, recvCounts, recvDispls, MPI_T_WORD, 0,
+              MPI_COMM_WORLD);
+
+  if (rank == 0) {
+#ifdef VERBOSE
+    printf("Master received this extended histogram: ");
+    for (int i = 0; i < extendedWordNumber; i++) {
+      printf("%s(%ld); ", extendedHistogramArray[i].word,
+             extendedHistogramArray[i].occurances);
+    }
+    printf("\n\n");
+#endif
+
+    // Compact the final histogram
+    t_WordNode *finalHistogramList = NULL;
+    compactHistogram(&finalHistogramList, extendedHistogramArray,
+                     extendedWordNumber);
+
+    t_WordNode *finalHistogramPtr = finalHistogramList;
+    printf("Master compacted the histogram: ");
+    while (finalHistogramPtr != NULL) {
+      printf("%s(%ld); ", finalHistogramPtr->word.word,
+             finalHistogramPtr->word.occurances);
+      finalHistogramPtr = finalHistogramPtr->next;
+    }
+    printf("\n\n");
+  }
 
   // TODO Free everything in the end
   /*
@@ -506,9 +658,12 @@ int main(int argc, char *argv[]) {
     free(fileNames);
     free(chunkArray);
     free(sendCount);
-    free(displs);
+    free(sendDispls);
   }
   */
+
+  // TODO Perform some code cleanup: every print should be done in the main
+  // only, use smarter solutions
 
   MPI_Finalize();
   return 0;
