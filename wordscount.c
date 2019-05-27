@@ -20,15 +20,21 @@
     + Master receive all data and call a custom reduce function that merges the
    results of each process.
     + Master prints all the results
+    - Free main structures in the heap
    --- Part 2: Local Beanchmark---
     + After everything has been tested, insert the time profiling code.
-    - Run some benchmarks in local and write down these data into a file
+    + Run some benchmarks in local and write down average of these data into a
+   time log file in the CWD.
    --- Part 3: Building---
-    - Insert ad additional CL parameter that is the directory of file in order
+    + Insert ad additional CLI parameter that is the directory of file in order
    to easily change the directory of input files
+    + Manage the error case where the CLI path does not esists
+    + Insert ad additional CLI parameter that is the log file base name
     - Make a script that launches the compilation and that launches the program
-   multiple times, according to the strong and weak scalability requirements
-   - Optionally, use different source files, builded together with make. The
+   multiple times, according to the strong and weak scalability requirements.
+   Record each time profiling into different time logs
+    - Code cleanup and optimization
+    - Use different source files, builded together with make. The
    make launch is done in the script
    --- Part 4: Cloud Benchmark---
     - Make another similar script that setups the whole cloud environment
@@ -58,8 +64,7 @@
 #define LINE_LIMIT 1024
 #define FILE_NAME_SIZE 256
 #define DEFAULT_FILE_LOCATION "./files/"
-
-// TODO Sistema queste strutture con alcune più intelligenti
+#define DEFAULT_TIME_LOG_FILE "time_log.txt"
 
 typedef struct FileName {
   char fileName[FILE_NAME_SIZE];
@@ -92,9 +97,9 @@ typedef struct WordNode {
 
 // fileNames will be an array pointer to a list of FileNames; the return value
 // is the file number
-int getFilesName(t_FileName **fileNames) {
+int getFilesName(t_FileName **fileNames, char *dirPath) {
   DIR *dir = NULL;
-  dir = opendir(DEFAULT_FILE_LOCATION);
+  dir = opendir(dirPath);
   if (dir == NULL) {
     return 0;
   }
@@ -112,7 +117,7 @@ int getFilesName(t_FileName **fileNames) {
   if (count == 0) {
     return 0;
   }
-  dir = opendir(DEFAULT_FILE_LOCATION);
+  dir = opendir(dirPath);
   if (dir == NULL) {
     return 0;
   }
@@ -133,16 +138,15 @@ int getFilesName(t_FileName **fileNames) {
   return count;
 }
 
-long int getLinesNumber(t_FileName *fileNames, int fileNumber) {
+long int getLinesNumber(t_FileName *fileNames, int fileNumber, char *dirPath) {
   // Read all files using the fileNames
   t_FileName *fileNamesPtr = fileNames;
   long int totalLineNumber = 0;
   char *selectedFile;
   for (int i = 0; i < fileNumber; i++) {
     char *fileFullName = (char *)calloc(
-        strlen(DEFAULT_FILE_LOCATION) + strlen(fileNamesPtr->fileName) + 1,
-        sizeof(char));
-    strcpy(fileFullName, DEFAULT_FILE_LOCATION);
+        strlen(dirPath) + strlen(fileNamesPtr->fileName) + 1, sizeof(char));
+    strcpy(fileFullName, dirPath);
     strcat(fileFullName, fileNamesPtr->fileName);
     FILE *fp = fopen(fileFullName, "r");
     if (fp == NULL) {
@@ -251,7 +255,7 @@ int chunksToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
 void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
   for (int i = 0; i < chunkNumber; i++) {
     t_Chunk chunk = chunkArray[i];
-    printf("Chunk{%s of %ld lines (%ld to %ld)}; ", chunk.fileName,
+    printf("Chunk{%s of %ld lines (%ld to %ld)};\n", chunk.fileName,
            (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
            chunk.endLine);
   }
@@ -335,7 +339,7 @@ void createWordDatatype(MPI_Datatype *newDatatype) {
 }
 
 long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
-                    int myChunkNumber) {
+                    int myChunkNumber, char *dirPath) {
   *myHistogramList = NULL;
   long int countedWords = 0;
   char wordBuf[LINE_LIMIT];
@@ -343,9 +347,8 @@ long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
   for (int i = 0; i < myChunkNumber; i++) {
     // File opening
     char *fileFullName = (char *)calloc(
-        strlen(DEFAULT_FILE_LOCATION) + strlen(myChunks[i].fileName) + 1,
-        sizeof(char));
-    strcpy(fileFullName, DEFAULT_FILE_LOCATION);
+        strlen(dirPath) + strlen(myChunks[i].fileName) + 1, sizeof(char));
+    strcpy(fileFullName, dirPath);
     strcat(fileFullName, myChunks[i].fileName);
     FILE *fp = fopen(fileFullName, "r");
 
@@ -456,6 +459,8 @@ int main(int argc, char *argv[]) {
       gatheringStartTime, compactStartTime;
   double initTime, scatterTime, wordcountTime, gatheringTime, compactTime;
   int rank, p;
+  char dirPath[FILE_NAME_SIZE], timelogFile[FILE_NAME_SIZE];
+  int canStart;
   t_FileName *fileNames;
   t_Chunk *chunkArray;
   int *sendCount, *recvCounts, *sendDispls, *recvDispls;
@@ -472,6 +477,20 @@ int main(int argc, char *argv[]) {
   createChunkDatatype(&MPI_T_CHUNK);
   createWordDatatype(&MPI_T_WORD);
 
+  // File directory from CLI if specified
+  strcpy(dirPath, DEFAULT_FILE_LOCATION);
+  strcpy(timelogFile, DEFAULT_TIME_LOG_FILE);
+  if (argc >= 2) {
+    char *basePath = malloc(2 + sizeof(argv[1]) + 1 + 1);
+    strcpy(basePath, "./");
+    strcat(basePath, argv[1]);
+    strcat(basePath, "/");
+    strcpy(dirPath, basePath);
+    if (argc >= 3) {
+      strcpy(timelogFile, argv[2]);
+    }
+  }
+
   // Master preprocessing
   if (rank == 0) {
 #ifdef VERBOSE
@@ -486,13 +505,17 @@ int main(int argc, char *argv[]) {
     // Fetch all files name and store them. Files are located in directory
     // "./files/", relative to the CWD (this is important in the readme)
     fileNames = NULL;
-    int fileNumber = getFilesName(&fileNames);
+    int fileNumber = getFilesName(&fileNames, dirPath);
     if (fileNames == NULL) {
-      printf("No files detected. Aborted...\n");
-      // TODO Correctly manage this error case
+      canStart = 0;
+      printf("No files found in directory %s\n", dirPath);
+      // TODO Correctly manage this error case, maybe broadcast a validity
+      // signal? packed with the first and second scatter?
     } else {
+      canStart = 1;
+
       // Read all files and get their line number
-      long int totalLineNumber = getLinesNumber(fileNames, fileNumber);
+      long int totalLineNumber = getLinesNumber(fileNames, fileNumber, dirPath);
 
 #ifdef DEBUG
       t_FileName *fileNamesPtr = fileNames;
@@ -509,7 +532,6 @@ int main(int argc, char *argv[]) {
           buildChunkList(fileNames, fileNumber, totalLineNumber, p);
 
       // TODO Is this conversion necessary? MPI_Type_create_hindexed()?
-
       // Aggiungere nel readme: si è valutato l'uso della lista con un uso
       // intelligente di sendDispls, tuttavia nel momento in cui unprocesso
       // doveva ricere due o più chunk li avrebbe presi sequenzialmente,
@@ -531,176 +553,217 @@ int main(int argc, char *argv[]) {
                                 totalLineNumber, p);
     }
   }
+  // Everyone run here
 
-  scatterStartTime = MPI_Wtime();
+  // If the master found at least one file, the algorithm can go on
+  MPI_Bcast(&canStart, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  if (canStart) {
+    scatterStartTime = MPI_Wtime();
 
-  // Scatters the sendCounts so that each process knows how many data expects
-  int myChunkNumber;
-  MPI_Scatter(sendCount, 1, MPI_INT, &myChunkNumber, 1, MPI_INT, 0,
-              MPI_COMM_WORLD);
+    // Scatters sendCounts so that each process knows how many chunks expects
+    int myChunkNumber;
+    MPI_Scatter(sendCount, 1, MPI_INT, &myChunkNumber, 1, MPI_INT, 0,
+                MPI_COMM_WORLD);
 
-  // Scatter the chunks
-  t_Chunk *myChunks = (t_Chunk *)calloc(myChunkNumber, sizeof(t_Chunk));
-  MPI_Scatterv(chunkArray, sendCount, sendDispls, MPI_T_CHUNK, myChunks,
-               myChunkNumber, MPI_T_CHUNK, 0, MPI_COMM_WORLD);
-
-#ifdef TIME
-  scatterTime = MPI_Wtime() - scatterStartTime;
-#endif
-#ifdef DEBUG
-  printf("%d) Received: ", rank);
-  printChunkArray(myChunks, myChunkNumber);
-  printf("\n");
-#endif
-
-  wordcountStartTime = MPI_Wtime();
-
-  // Each process launches wordcounts procedure on its chunks
-  t_WordNode *myHistogramList;
-  long int countedWords = wordscount(&myHistogramList, myChunks, myChunkNumber);
+    // Scatter the chunks
+    t_Chunk *myChunks = (t_Chunk *)calloc(myChunkNumber, sizeof(t_Chunk));
+    MPI_Scatterv(chunkArray, sendCount, sendDispls, MPI_T_CHUNK, myChunks,
+                 myChunkNumber, MPI_T_CHUNK, 0, MPI_COMM_WORLD);
 
 #ifdef TIME
-  wordcountTime = MPI_Wtime() - wordcountStartTime;
+    scatterTime = MPI_Wtime() - scatterStartTime;
 #endif
 #ifdef DEBUG
-  printf("%d) Counted %ld words\n", rank, countedWords);
-#endif
-#ifdef VERBOSE
-  t_WordNode *wordNodePtr = myHistogramList;
-  while (wordNodePtr != NULL) {
-    printf("%d) counted \"%s\" for %ld times\n", rank, wordNodePtr->word.word,
-           wordNodePtr->word.occurances);
-    wordNodePtr = wordNodePtr->next;
-  }
-#endif
-
-  // Convert histogram list into an array
-  t_Word *myHistogramArray;
-  int myWordNumber = wordsToArray(&myHistogramArray, myHistogramList);
-
-#ifdef VERBOSE
-  printf("%d) Histogram: ", rank);
-  for (int i = 0; i < myWordNumber; i++) {
-    printf("%s(%ld); ", myHistogramArray[i].word,
-           myHistogramArray[i].occurances);
-  }
-  printf("\n\n");
-#endif
-
-  gatheringStartTime = MPI_Wtime();
-
-  // Gather all wordNumbers
-  if (rank == 0) {
-    recvCounts = (int *)calloc(p, sizeof(int));
-    recvDispls = (int *)calloc(p, sizeof(int));
-  }
-  MPI_Gather(&myWordNumber, 1, MPI_INT, recvCounts, 1, MPI_INT, 0,
-             MPI_COMM_WORLD);
-
-  if (rank == 0) {
-#ifdef VERBOSE
-    printf("recvCounts: ");
-    for (int i = 0; i < p; i++) {
-      printf("%d, ", recvCounts[i]);
-    }
+    printf("%d) Received: ", rank);
+    printChunkArray(myChunks, myChunkNumber);
     printf("\n");
 #endif
 
-    // TODO Questa creazione può essere messe in una
-    // funzione a parte dato che è fatta ugualmente anche in un altro caso
-    recvDispls[0] = 0;
-#ifdef VERBOSE
-    printf("recvDispls: ");
-    printf("%d, ", recvDispls[0]);
-#endif
-    for (int i = 1; i < p; i++) {
-      recvDispls[i] = recvCounts[i - 1] + recvDispls[i - 1];
-#ifdef VERBOSE
-      printf("%d, ", recvDispls[i]);
-#endif
-    }
-#ifdef VERBOSE
-    printf("\n\n");
-#endif
+    wordcountStartTime = MPI_Wtime();
 
-    // Sum recvCounts for the size of extendedHistogramArray
-    extendedWordNumber = 0;
-    for (int i = 0; i < p; i++) {
-      extendedWordNumber += recvCounts[i];
-    }
-
-    extendedHistogramArray =
-        (t_Word *)calloc(extendedWordNumber, sizeof(t_Word));
-  }
-
-  // Gather all histograms
-  MPI_Gatherv(myHistogramArray, myWordNumber, MPI_T_WORD,
-              extendedHistogramArray, recvCounts, recvDispls, MPI_T_WORD, 0,
-              MPI_COMM_WORLD);
+    // Each process launches wordcounts procedure on its chunks
+    t_WordNode *myHistogramList;
+    long int countedWords =
+        wordscount(&myHistogramList, myChunks, myChunkNumber, dirPath);
 
 #ifdef TIME
-  gatheringTime = MPI_Wtime() - gatheringStartTime;
+    wordcountTime = MPI_Wtime() - wordcountStartTime;
+#endif
+#ifdef DEBUG
+    printf("%d) Counted %ld words\n", rank, countedWords);
+#endif
+#ifdef VERBOSE
+    t_WordNode *wordNodePtr = myHistogramList;
+    while (wordNodePtr != NULL) {
+      printf("%d) counted \"%s\" for %ld times\n", rank, wordNodePtr->word.word,
+             wordNodePtr->word.occurances);
+      wordNodePtr = wordNodePtr->next;
+    }
 #endif
 
-  if (rank == 0) {
+    // Convert histogram list into an array
+    t_Word *myHistogramArray;
+    int myWordNumber = wordsToArray(&myHistogramArray, myHistogramList);
+
 #ifdef VERBOSE
-    printf("Master received this extended histogram: ");
-    for (int i = 0; i < extendedWordNumber; i++) {
-      printf("%s(%ld); ", extendedHistogramArray[i].word,
-             extendedHistogramArray[i].occurances);
+    printf("%d) Histogram: ", rank);
+    for (int i = 0; i < myWordNumber; i++) {
+      printf("%s(%ld); ", myHistogramArray[i].word,
+             myHistogramArray[i].occurances);
     }
     printf("\n\n");
 #endif
 
-    compactStartTime = MPI_Wtime();
+    gatheringStartTime = MPI_Wtime();
 
-    // Compact the final histogram
-    t_WordNode *finalHistogramList = NULL;
-    compactHistogram(&finalHistogramList, extendedHistogramArray,
-                     extendedWordNumber);
-
-#ifdef TIME
-    compactTime = MPI_Wtime() - compactStartTime;
-#endif
-
-    t_WordNode *finalHistogramPtr = finalHistogramList;
-    printf("Master compacted the histogram: ");
-    while (finalHistogramPtr != NULL) {
-      printf("%s(%ld); ", finalHistogramPtr->word.word,
-             finalHistogramPtr->word.occurances);
-      finalHistogramPtr = finalHistogramPtr->next;
+    // Gather all wordNumbers
+    if (rank == 0) {
+      recvCounts = (int *)calloc(p, sizeof(int));
+      recvDispls = (int *)calloc(p, sizeof(int));
     }
-    printf("\n\n");
-  }
+    MPI_Gather(&myWordNumber, 1, MPI_INT, recvCounts, 1, MPI_INT, 0,
+               MPI_COMM_WORLD);
 
-  // TODO Free everything!!!!!
-  /*
-  MPI_Type_free(&MPI_T_CHUNK);
-  if (rank == 0) {
-    free(fileNames);
-    free(chunkArray);
-    free(sendCount);
-    free(sendDispls);
-  }
-  */
+    if (rank == 0) {
+#ifdef VERBOSE
+      printf("recvCounts: ");
+      for (int i = 0; i < p; i++) {
+        printf("%d, ", recvCounts[i]);
+      }
+      printf("\n");
+#endif
 
-  // TODO Perform some code cleanup: every print should be done in the main
-  // only, use smarter solutions
+      // TODO Questa creazione può essere messe in una
+      // funzione a parte dato che è fatta ugualmente anche in un altro caso
+      recvDispls[0] = 0;
+#ifdef VERBOSE
+      printf("recvDispls: ");
+      printf("%d, ", recvDispls[0]);
+#endif
+      for (int i = 1; i < p; i++) {
+        recvDispls[i] = recvCounts[i - 1] + recvDispls[i - 1];
+#ifdef VERBOSE
+        printf("%d, ", recvDispls[i]);
+#endif
+      }
+#ifdef VERBOSE
+      printf("\n\n");
+#endif
+
+      // Sum recvCounts for the size of extendedHistogramArray
+      extendedWordNumber = 0;
+      for (int i = 0; i < p; i++) {
+        extendedWordNumber += recvCounts[i];
+      }
+
+      extendedHistogramArray =
+          (t_Word *)calloc(extendedWordNumber, sizeof(t_Word));
+    }
+
+    // Gather all histograms
+    MPI_Gatherv(myHistogramArray, myWordNumber, MPI_T_WORD,
+                extendedHistogramArray, recvCounts, recvDispls, MPI_T_WORD, 0,
+                MPI_COMM_WORLD);
 
 #ifdef TIME
-  double globalTime = MPI_Wtime() - globalStartTime;
-  if (rank == 0) {
-    double initTime = MPI_Wtime() - initStartTime;
-    printf("0) Init phase took %f seconds\n", initTime);
-  }
-  printf("%d) Scattering phase took %f seconds\n", rank, scatterTime);
-  printf("%d) Wordcount phase took %f seconds\n", rank, wordcountTime);
-  printf("%d) Gathering phase took %f seconds\n", rank, gatheringTime);
-  if (rank == 0) {
-    printf("0) Compaction phase took %f seconds\n", compactTime);
-  }
-  printf("%d) Everything terminated in %f seconds\n", rank, globalTime);
+    gatheringTime = MPI_Wtime() - gatheringStartTime;
 #endif
+
+    if (rank == 0) {
+#ifdef VERBOSE
+      printf("Master received this extended histogram: ");
+      for (int i = 0; i < extendedWordNumber; i++) {
+        printf("%s(%ld); ", extendedHistogramArray[i].word,
+               extendedHistogramArray[i].occurances);
+      }
+      printf("\n\n");
+#endif
+
+      compactStartTime = MPI_Wtime();
+
+      // Compact the final histogram
+      t_WordNode *finalHistogramList = NULL;
+      compactHistogram(&finalHistogramList, extendedHistogramArray,
+                       extendedWordNumber);
+
+#ifdef TIME
+      compactTime = MPI_Wtime() - compactStartTime;
+#endif
+
+      t_WordNode *finalHistogramPtr = finalHistogramList;
+      printf("Master compacted the histogram: ");
+      while (finalHistogramPtr != NULL) {
+        printf("%s(%ld); ", finalHistogramPtr->word.word,
+               finalHistogramPtr->word.occurances);
+        finalHistogramPtr = finalHistogramPtr->next;
+      }
+      printf("\n\n");
+    }
+
+#ifdef TIME
+    // Print and write time profiling
+    double globalTime = MPI_Wtime() - globalStartTime;
+    if (rank == 0) {
+      double initTime = MPI_Wtime() - initStartTime;
+      printf("0) Init phase took %f seconds\n", initTime);
+    }
+
+    printf("%d) Scattering phase took %f seconds\n", rank, scatterTime);
+    printf("%d) Wordcount phase took %f seconds\n", rank, wordcountTime);
+    printf("%d) Gathering phase took %f seconds\n", rank, gatheringTime);
+    if (rank == 0) {
+      printf("0) Compaction phase took %f seconds\n", compactTime);
+    }
+    printf("%d) Everything terminated in %f seconds\n", rank, globalTime);
+
+    // Pack all time data and reduce them all into average
+    double scatterTimeAvg = 0, wordcountTimeAvg = 0, gatheringTimeAvg = 0,
+           compactTimeAvg = 0, globalTimeAvg = 0;
+    MPI_Reduce(&scatterTime, &scatterTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&wordcountTime, &wordcountTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&gatheringTime, &gatheringTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&compactTime, &compactTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&globalTime, &globalTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    if (rank == 0) {
+      scatterTimeAvg /= p;
+      wordcountTimeAvg /= p;
+      gatheringTimeAvg /= p;
+      compactTimeAvg /= p;
+      globalTimeAvg /= p;
+      printf("Average Scattering time %f\n", scatterTimeAvg);
+      printf("Average Words count time %f\n", wordcountTimeAvg);
+      printf("Average Gathering time %f\n", gatheringTimeAvg);
+      printf("Average Compaction time %f\n", compactTimeAvg);
+      printf("Average Global time %f\n", globalTimeAvg);
+
+      // Write to file
+      FILE *fp = fopen(timelogFile, "w");
+      fprintf(fp, "Average Scattering time %f\n", scatterTimeAvg);
+      fprintf(fp, "Average Words count time %f\n", wordcountTimeAvg);
+      fprintf(fp, "Average Gathering time %f\n", gatheringTimeAvg);
+      fprintf(fp, "Average Compaction time %f\n", compactTimeAvg);
+      fprintf(fp, "Average Global time %f\n", globalTimeAvg);
+      fclose(fp);
+    }
+#endif
+
+    // TODO Free everything!!!!!
+    /*
+    MPI_Type_free(&MPI_T_CHUNK);
+    if (rank == 0) {
+      free(fileNames);
+      free(chunkArray);
+      free(sendCount);
+      free(sendDispls);
+      fclose(fp);
+    }
+    */
+  }
   MPI_Finalize();
   return 0;
 }
