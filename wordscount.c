@@ -32,12 +32,11 @@
    to easily change the directory of input files
     + Manage the error case where the CLI path does not esists
     + Insert ad additional CLI parameter that is the log file base name
-    - Make a script that launches the compilation and that launches the program
+    + Use different source files, builded together with make.
+    - Code cleanup and optimization!
+    - Make a script that launches make and mpirun
    multiple times, according to the strong and weak scalability requirements.
    Record each time profiling into different time logs
-    - Code cleanup and optimization!
-    - Use different source files, builded together with make. The
-   make launch is done in the script
    --- Part 4: Cloud Benchmark---
     - Make another similar script that setups the whole cloud environment
     - Run some benchmarks on EC2 instances
@@ -58,133 +57,30 @@
 #include <string.h>
 #include <time.h>
 #include "mpi.h"
-#include "file_utils.h"
+#include "wordscount_core.h"
 #define TIME
 #define DEBUG
-#define LINE_LIMIT 1024
-#define FILE_NAME_SIZE 256
 #define DEFAULT_FILE_LOCATION "./files/"
 #define DEFAULT_TIME_LOG_FILE "time_log.txt"
 
-typedef struct ChunkNode {
-  t_FileName *fileName;
-  long int startLine;
-  long int endLine;
-  struct ChunkNode *next;
-} t_ChunkNode;
-
-typedef struct Chunk {
-  char fileName[FILE_NAME_SIZE];
-  long int startLine;
-  long int endLine;
-} t_Chunk;
-
 // Nel readme dire che l'uso di una hashmap sarebbe ottimale
-typedef struct Word {
-  char word[LINE_LIMIT];
-  long int occurances;
-} t_Word;
 
-typedef struct WordNode {
-  t_Word word;
-  struct WordNode *next;
-} t_WordNode;
-
-t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
-                            long int totalLineNumber, int p) {
-  long int standardChunkSize = totalLineNumber / p;
-#ifdef DEBUG
-  printf("Each process should work on roughtly: %ld lines\n",
-         standardChunkSize);
-#endif
-  int remainder = totalLineNumber % p;
-
-  long int nextChunkSize = standardChunkSize;
-  if (remainder > 0) {
-    nextChunkSize++;
-    remainder--;
-  }
-  t_FileName *fileNamesPtr = fileNames;
-  t_ChunkNode *firstChunkPtr = NULL, *wordPtr = NULL;
-  for (int i = 0; i < fileNumber; i++) {
-    long int lastLine = -1;
-    long int leftLines = fileNamesPtr->lineNumber;
-    while (leftLines > 0) {
-      // New chunk for this file. If it is the first, it will be the head
-      if (wordPtr == NULL) {
-        wordPtr = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
-        firstChunkPtr = wordPtr;
-      } else {
-        wordPtr->next = (t_ChunkNode *)malloc(sizeof(t_ChunkNode));
-        wordPtr = wordPtr->next;
-      }
-      wordPtr->fileName = fileNamesPtr;
-      wordPtr->startLine = lastLine + 1;
-      wordPtr->next = NULL;
-
-      // Compute the amount of lines that can be used
-      long int actualChunkSize;
-
-#ifdef DEBUG
-      printf("Created a chunk for file %s (%ld)\n", wordPtr->fileName->fileName,
-             wordPtr->fileName->lineNumber);
-      printf(
-          "There are %ld lines in file %s. Next chunk will have %ld "
-          "lines\n",
-          leftLines, wordPtr->fileName->fileName, nextChunkSize);
-#endif
-      if (leftLines >= nextChunkSize) {
-        actualChunkSize = nextChunkSize;
-        nextChunkSize = standardChunkSize;
-        if (remainder > 0) {
-          nextChunkSize++;
-          remainder--;
-        }
-      } else {
-        actualChunkSize = leftLines;
-        nextChunkSize -= leftLines;
-      }
-      lastLine += actualChunkSize;
-      wordPtr->endLine = lastLine;
-      leftLines -= actualChunkSize;
-    }
-    // Go to next file
-    fileNamesPtr++;
-  }
-  if (nextChunkSize < standardChunkSize) {
-    printf("There are some unassigned lines...\n");
-  }
-  return firstChunkPtr;
+void createChunkDatatype(MPI_Datatype *newDatatype) {
+  int blockNumber = 3;
+  int blockLengths[] = {FILE_NAME_SIZE, 1, 1};
+  long int displs[] = {0, FILE_NAME_SIZE, FILE_NAME_SIZE + 8};
+  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T, MPI_INT64_T};
+  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
+  MPI_Type_commit(newDatatype);
 }
 
-int chunksToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
-  // First, we need to count the number of chunks
-  int chunkNumber = 0;
-  t_ChunkNode *wordPtr = chunkList;
-  while (wordPtr != NULL) {
-    chunkNumber++;
-    wordPtr = wordPtr->next;
-  }
-  *chunkArray = (t_Chunk *)calloc(chunkNumber, sizeof(t_Chunk));
-
-  // Conversion
-  wordPtr = chunkList;
-  for (int i = 0; i < chunkNumber; i++) {
-    strcpy((*chunkArray)[i].fileName, wordPtr->fileName->fileName);
-    (*chunkArray)[i].startLine = wordPtr->startLine;
-    (*chunkArray)[i].endLine = wordPtr->endLine;
-    wordPtr = wordPtr->next;
-  }
-  return chunkNumber;
-}
-
-void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
-  for (int i = 0; i < chunkNumber; i++) {
-    t_Chunk chunk = chunkArray[i];
-    printf("Chunk{%s of %ld lines (%ld to %ld)};\n", chunk.fileName,
-           (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
-           chunk.endLine);
-  }
+void createWordDatatype(MPI_Datatype *newDatatype) {
+  int blockNumber = 2;
+  int blockLengths[] = {LINE_LIMIT, 1};
+  long int displs[] = {0, LINE_LIMIT};
+  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T};
+  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
+  MPI_Type_commit(newDatatype);
 }
 
 void prepareSendCountAndDispls(int *sendCounts, int *sendDispls,
@@ -244,139 +140,6 @@ void prepareSendCountAndDispls(int *sendCounts, int *sendDispls,
 #ifdef DEBUG
   printf("\n\n");
 #endif
-}
-
-void createChunkDatatype(MPI_Datatype *newDatatype) {
-  int blockNumber = 3;
-  int blockLengths[] = {FILE_NAME_SIZE, 1, 1};
-  long int displs[] = {0, FILE_NAME_SIZE, FILE_NAME_SIZE + 8};
-  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T, MPI_INT64_T};
-  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
-  MPI_Type_commit(newDatatype);
-}
-
-void createWordDatatype(MPI_Datatype *newDatatype) {
-  int blockNumber = 2;
-  int blockLengths[] = {LINE_LIMIT, 1};
-  long int displs[] = {0, LINE_LIMIT};
-  MPI_Datatype types[] = {MPI_CHAR, MPI_INT64_T};
-  MPI_Type_create_struct(blockNumber, blockLengths, displs, types, newDatatype);
-  MPI_Type_commit(newDatatype);
-}
-
-long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
-                    int myChunkNumber, char *dirPath) {
-  *myHistogramList = NULL;
-  long int countedWords = 0;
-  char wordBuf[LINE_LIMIT];
-
-  for (int i = 0; i < myChunkNumber; i++) {
-    // File opening
-    char *fileFullName = (char *)calloc(
-        strlen(dirPath) + strlen(myChunks[i].fileName) + 1, sizeof(char));
-    strcpy(fileFullName, dirPath);
-    strcat(fileFullName, myChunks[i].fileName);
-    FILE *fp = fopen(fileFullName, "r");
-
-    // Add offset according to start line
-    for (int j = 0; j < myChunks[i].startLine; j++) {
-      fgets(wordBuf, LINE_LIMIT, fp);
-    }
-
-    // Terminate when every lines has been counter or file ends
-    int wordsFile = myChunks[i].endLine - myChunks[i].startLine + 1;
-    for (int j = 0; j < wordsFile && fgets(wordBuf, LINE_LIMIT, fp) != NULL;
-         j++) {
-      // Replace \n with \0 in order to have fewer chars
-      int wordLength = strlen(wordBuf);
-      if (*(wordBuf + wordLength - 1) == '\n') {
-        *(wordBuf + wordLength - 1) = '\0';
-      }
-
-      // Look for the read word in the myHistogramList. If present, increase
-      // occurences, otherwise append a new node
-      if (*myHistogramList == NULL) {
-        *myHistogramList = (t_WordNode *)malloc(sizeof(t_WordNode));
-        strcpy((*myHistogramList)->word.word, wordBuf);
-        (*myHistogramList)->word.occurances = 1;
-        (*myHistogramList)->next = NULL;
-      } else {
-        t_WordNode *wordNodePtr = *myHistogramList;
-        while (strcmp(wordNodePtr->word.word, wordBuf) != 0 &&
-               wordNodePtr->next != NULL) {
-          wordNodePtr = wordNodePtr->next;
-        }
-        if (strcmp(wordNodePtr->word.word, wordBuf) != 0) {  // Not found
-          wordNodePtr->next = (t_WordNode *)malloc(sizeof(t_WordNode));
-          wordNodePtr = wordNodePtr->next;
-          strcpy(wordNodePtr->word.word, wordBuf);
-          wordNodePtr->word.occurances = 1;
-          wordNodePtr->next = NULL;
-        } else {  // Found
-          wordNodePtr->word.occurances++;
-        }
-      }
-    }
-    fclose(fp);
-    free(fileFullName);
-    countedWords += wordsFile;
-  }
-  return countedWords;
-}
-
-int wordsToArray(t_Word **wordArray, t_WordNode *wordList) {
-  // First, we need to count the number of words
-  int chunkNumber = 0;
-  t_WordNode *wordPtr = wordList;
-  while (wordPtr != NULL) {
-    chunkNumber++;
-    wordPtr = wordPtr->next;
-  }
-  *wordArray = (t_Word *)calloc(chunkNumber, sizeof(t_Word));
-
-  // Conversione
-  wordPtr = wordList;
-  for (int i = 0; i < chunkNumber; i++) {
-    (*wordArray)[i] = wordPtr->word;
-    wordPtr = wordPtr->next;
-  }
-  return chunkNumber;
-}
-
-void compactHistogram(t_WordNode **finalHistogramList,
-                      t_Word *extendedHistogramArray, int extendedWordNumber) {
-  t_WordNode *finalHistogramPtr;
-  for (int i = 0; i < extendedWordNumber; i++) {
-    // There are no words yet
-    if (*finalHistogramList == NULL) {
-      *finalHistogramList = malloc(sizeof(t_WordNode));
-      strcpy((*finalHistogramList)->word.word, extendedHistogramArray[i].word);
-      (*finalHistogramList)->word.occurances =
-          extendedHistogramArray[i].occurances;
-      (*finalHistogramList)->next = NULL;
-    } else {
-      // Look if this word already exist
-      finalHistogramPtr = *finalHistogramList;
-      while (strcmp(finalHistogramPtr->word.word,
-                    extendedHistogramArray[i].word) != 0 &&
-             finalHistogramPtr->next != NULL) {
-        finalHistogramPtr = finalHistogramPtr->next;
-      }
-      // Not found
-      if (strcmp(finalHistogramPtr->word.word,
-                 extendedHistogramArray[i].word) != 0) {
-        finalHistogramPtr->next = malloc(sizeof(t_WordNode));
-        finalHistogramPtr = finalHistogramPtr->next;
-        strcpy(finalHistogramPtr->word.word, extendedHistogramArray[i].word);
-        finalHistogramPtr->word.occurances =
-            extendedHistogramArray[i].occurances;
-        finalHistogramPtr->next = NULL;
-      } else {
-        finalHistogramPtr->word.occurances +=
-            extendedHistogramArray[i].occurances;
-      }
-    }
-  }
 }
 
 int main(int argc, char *argv[]) {

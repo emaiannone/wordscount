@@ -1,16 +1,10 @@
+#include "file_utils.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define LINE_LIMIT 1024
-#define FILE_NAME_SIZE 256
-typedef struct FileName {
-  char fileName[FILE_NAME_SIZE];
-  long int lineNumber;
-} t_FileName;
 
-// fileNames will be an array pointer to a list of FileNames; the return value
-// is the file number
+// fileNames is an array pointer to FileNames; return value is file number
 int getFilesName(t_FileName **fileNames, char *dirPath) {
   DIR *dir = NULL;
   dir = opendir(dirPath);
