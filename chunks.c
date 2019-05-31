@@ -5,15 +5,11 @@
 #define DEBUG
 
 t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
-                            long int totalLineNumber, int p) {
-  long int standardChunkSize = totalLineNumber / p;
-#ifdef DEBUG
-  printf("Each process should work on roughtly: %ld lines\n",
-         standardChunkSize);
-#endif
-  int remainder = totalLineNumber % p;
+                            long int totalLines, int workers) {
+  long int stdChunkSize = totalLines / workers;
+  int remainder = totalLines % workers;
 
-  long int nextChunkSize = standardChunkSize;
+  long int nextChunkSize = stdChunkSize;
   if (remainder > 0) {
     nextChunkSize++;
     remainder--;
@@ -36,9 +32,6 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
       wordPtr->startLine = lastLine + 1;
       wordPtr->next = NULL;
 
-      // Compute the amount of lines that can be used
-      long int actualChunkSize;
-
 #ifdef DEBUG
       printf("Created a chunk for file %s (%ld)\n", wordPtr->fileName->fileName,
              wordPtr->fileName->lineNumber);
@@ -47,9 +40,11 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
           "lines\n",
           leftLines, wordPtr->fileName->fileName, nextChunkSize);
 #endif
+      // Compute the amount of lines that can be used
+      long int actualChunkSize;
       if (leftLines >= nextChunkSize) {
         actualChunkSize = nextChunkSize;
-        nextChunkSize = standardChunkSize;
+        nextChunkSize = stdChunkSize;
         if (remainder > 0) {
           nextChunkSize++;
           remainder--;
@@ -65,8 +60,9 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
     // Go to next file
     fileNamesPtr++;
   }
-  if (nextChunkSize < standardChunkSize) {
-    printf("There are some unassigned lines...\n");
+  if (nextChunkSize < stdChunkSize) {
+    printf("There are some unassigned lines, results may be incorrect\n");
+    return NULL;
   }
   return firstChunkPtr;
 }
@@ -90,13 +86,4 @@ int chunksToArray(t_Chunk **chunkArray, t_ChunkNode *chunkList) {
     wordPtr = wordPtr->next;
   }
   return chunkNumber;
-}
-
-void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
-  for (int i = 0; i < chunkNumber; i++) {
-    t_Chunk chunk = chunkArray[i];
-    printf("Chunk{%s of %ld lines (%ld to %ld)};\n", chunk.fileName,
-           (chunk.endLine) - (chunk.startLine) + 1, chunk.startLine,
-           chunk.endLine);
-  }
 }

@@ -1,5 +1,5 @@
-GCC = gcc
-MPICC = mpicc
+GCC = gcc -Wall
+MPICC = mpicc -Wall
 GCCFLAGS = -c
 MPICCFLAGS = -fopenmp
 WORDSCOUNT = wordscount
