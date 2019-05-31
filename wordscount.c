@@ -40,13 +40,11 @@
     + Insert ad additional CLI parameter that is the log file base name
     + Use different source files, builded together with make.
     + Code cleanup and optimization: split main into different functions
-    - Change long int into unsigned long int and adapt code
-    - Check why global time is too high
-    - Change run_all.sh to allow the two CLI parameters: dirPath and timeLogFile
-    - Make a benchmark script that launches make and mpirun
+    + Change long int into unsigned long int and adapt code
+    + Change run_all.sh to allow the two CLI parameters: dirPath and
+  timeLogFile.
+    + Make a benchmark script that launches make and mpirun
    multiple times, according to the strong and weak scalability requirements.
-   Record each time profiling into different time logs. This new script should
-  receive the two CLI params
    --- Part 4: Cloud Benchmark---
     - Make another similar script that setups the whole cloud environment
     - Run some benchmarks on EC2 instances
@@ -69,7 +67,7 @@
 #include "mpi.h"
 #include "wordscount_core.h"
 #define TIME
-#define DEBUG
+//#define DEBUG
 #define DEFAULT_FILE_LOCATION "./files/"
 #define DEFAULT_TIME_LOG_FILE "time_log.txt"
 
@@ -102,7 +100,7 @@ void printChunkArray(t_Chunk *chunkArray, int chunkNumber) {
 
 void prepareSendCounts(int *sendCounts, t_Chunk *chunkArray, int chunkArraySize,
                        int totalLines, int p) {
-  long int standardChunkSize = totalLines / p;
+  unsigned long int standardChunkSize = totalLines / p;
   int remainder = totalLines % p;
 
   // Index for chunks
@@ -110,8 +108,8 @@ void prepareSendCounts(int *sendCounts, t_Chunk *chunkArray, int chunkArraySize,
   for (int i = 0; i < p; i++) {  // For each process
     // Prepare everything for this process
     int chunkToSend = 0;
-    long int accumulatedChunkSize = 0;
-    long int nextChunkSize = standardChunkSize;
+    unsigned long int accumulatedChunkSize = 0;
+    unsigned long int nextChunkSize = standardChunkSize;
     if (remainder > 0) {
       nextChunkSize++;
       remainder--;
@@ -209,7 +207,8 @@ int main(int argc, char *argv[]) {
       printf("No files found in directory %s\n", dirPath);
     } else {
       // Read each file and get the total lines
-      long int totalLines = getLinesNumber(fileNames, fileNumber, dirPath);
+      unsigned long int totalLines =
+          getLinesNumber(fileNames, fileNumber, dirPath);
 
 #ifdef DEBUG
       printf("Found %d files:\n", fileNumber);
@@ -293,7 +292,7 @@ int main(int argc, char *argv[]) {
     wordcountStartTime = MPI_Wtime();
     // Each process launches wordcounts procedure on its chunks
     t_WordNode *myHistogramList;
-    long int countedWords =
+    unsigned long int countedWords =
         wordscount(&myHistogramList, myChunks, myChunkNumber, dirPath);
 #ifdef TIME
     wordcountTime = MPI_Wtime() - wordcountStartTime;
@@ -404,27 +403,20 @@ int main(int argc, char *argv[]) {
     }
 
 #ifdef TIME
-    // Print and write time profiling
+    // Print parallel part times
     double globalTime = MPI_Wtime() - globalStartTime;
-    if (rank == 0) {
-      printf("P0) Init phase took %f seconds\n", initTime);
-    }
-
     if (p != 1) {
-      printf("P%d) Scattering phase took %f seconds\n", rank, scatterTime);
-      printf("P%d) Gathering phase took %f seconds\n", rank, gatheringTime);
+      printf("P%d) Scattering, %f\n", rank, scatterTime);
     }
-    printf("P%d) Wordcount phase took %f seconds\n", rank, wordcountTime);
-
-    if (rank == 0) {
-      printf("P0) Compaction phase took %f seconds\n", compactTime);
+    printf("P%d) Wordscount, %f\n", rank, wordcountTime);
+    if (p != 1) {
+      printf("P%d) Gathering, %f\n", rank, gatheringTime);
     }
-    printf("P%d) Everything terminated in %f seconds\n", rank, globalTime);
-    printf("\n");
+    printf("P%d) Global, %f\n\n", rank, globalTime);
 
     // Reduce all time data as average
     double scatterTimeAvg = 0, wordcountTimeAvg = 0, gatheringTimeAvg = 0,
-           compactTimeAvg = 0, globalTimeAvg = 0;
+           globalTimeAvg = 0;
     if (p != 1) {
       MPI_Reduce(&scatterTime, &scatterTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
                  MPI_COMM_WORLD);
@@ -432,109 +424,51 @@ int main(int argc, char *argv[]) {
                  MPI_COMM_WORLD);
       MPI_Reduce(&gatheringTime, &gatheringTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
                  MPI_COMM_WORLD);
-      MPI_Reduce(&compactTime, &compactTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
-                 MPI_COMM_WORLD);
       MPI_Reduce(&globalTime, &globalTimeAvg, 1, MPI_DOUBLE, MPI_SUM, 0,
                  MPI_COMM_WORLD);
       scatterTimeAvg /= p;
       wordcountTimeAvg /= p;
       gatheringTimeAvg /= p;
-      compactTimeAvg /= p;
       globalTimeAvg /= p;
     } else {
       scatterTimeAvg = scatterTime;
       wordcountTimeAvg = wordcountTime;
       gatheringTimeAvg = gatheringTime;
-      compactTimeAvg = compactTime;
       globalTimeAvg = globalTime;
     }
-    if (rank == 0) {
-      // Print to stdout
-      printf("Average Words count time %f\n", wordcountTimeAvg);
-      if (p != 1) {
-        printf("Average Scattering time %f\n", scatterTimeAvg);
-        printf("Average Gathering time %f\n", gatheringTimeAvg);
-      }
-      printf("Average Compaction time %f\n", compactTimeAvg);
-      printf("Average Global time %f\n", globalTimeAvg);
 
-      // Write to file
-      FILE *fp = fopen(timelogFilePath, "w");
-      fprintf(fp, "Average Words count time %f\n", wordcountTimeAvg);
+    if (rank == 0) {
+      // Print average times
+      printf("Init, %f\n", initTime);
       if (p != 1) {
-        fprintf(fp, "Average Scattering time %f\n", scatterTimeAvg);
-        fprintf(fp, "Average Gathering time %f\n", gatheringTimeAvg);
+        printf("Average Scattering, %f\n", scatterTimeAvg);
       }
-      fprintf(fp, "Average Compaction time %f\n", compactTimeAvg);
-      fprintf(fp, "Average Global time %f\n", globalTimeAvg);
+      printf("Average Wordscount, %f\n", wordcountTimeAvg);
+      if (p != 1) {
+        printf("Average Gathering, %f\n", gatheringTimeAvg);
+      }
+      printf("Compaction, %f\n", compactTime);
+      printf("Average Global, %f\n", globalTimeAvg);
+
+      // Write average times
+      FILE *fp = fopen(timelogFilePath, "a");
+      fprintf(fp, "---%d process(es) in %s directory---\n", p, dirPath);
+      fprintf(fp, "Init, %f\n", initTime);
+      if (p != 1) {
+        fprintf(fp, "Average Scattering, %f\n", scatterTimeAvg);
+      }
+      fprintf(fp, "Average Wordscount, %f\n", wordcountTimeAvg);
+      if (p != 1) {
+        fprintf(fp, "Average Gathering, %f\n", gatheringTimeAvg);
+      }
+      fprintf(fp, "Compaction, %f\n", compactTime);
+      fprintf(fp, "Average Global, %f\n", globalTimeAvg);
       fclose(fp);
     }
 #endif
   } else {
-    printf("Aborted...\n");
+    printf("P%d) Aborting...\n", rank);
   }
   MPI_Finalize();
   return 0;
 }
-
-/*
-// TODO Split into prepareCounts and prepareDispls, reusable even for recv
-void prepareSendCountAndDispls(int *sendCounts, int *sendDispls,
-                               t_Chunk *chunkArray, int chunkArraySize,
-                               int totalLines, int p) {
-  long int standardChunkSize = totalLines / p;
-  int remainder = totalLines % p;
-  long int nextChunkSize = standardChunkSize;
-  if (remainder > 0) {
-    nextChunkSize++;
-    remainder--;
-  }
-
-  // Prepare send count array
-  int chunkToSend = 0;
-  long int accumulatedChunkSize = 0;
-  int j = 0;
-  for (int i = 0; i < p; i++) {
-    // Accumulate the needed chunks
-    while (j < chunkArraySize && accumulatedChunkSize < nextChunkSize) {
-      chunkToSend++;
-      accumulatedChunkSize +=
-          (chunkArray[j].endLine) - (chunkArray[j].startLine) + 1;
-      j++;
-    }
-    // This shouldn't happen. If yes, there is a bug to fix!
-    if (accumulatedChunkSize < nextChunkSize) {
-      printf("Error: bad work splitting for process %d. Aborting\n", i);
-      printf("Accumulated %ld lines, but required %ld\n", accumulatedChunkSize,
-             nextChunkSize);
-      return;
-    }
-    sendCounts[i] = chunkToSend;
-
-    // Prepare everything for next process
-    chunkToSend = 0;
-    accumulatedChunkSize = 0;
-    nextChunkSize = standardChunkSize;
-    if (remainder > 0) {
-      nextChunkSize++;
-      remainder--;
-    }
-  }
-
-  // Prepare displacement arrays
-  sendDispls[0] = 0;
-#ifdef DEBUG
-  printf("sendDispls: ");
-  printf("%d, ", sendDispls[0]);
-#endif
-  for (int i = 1; i < p; i++) {
-    sendDispls[i] = sendCounts[i - 1] + sendDispls[i - 1];
-#ifdef DEBUG
-    printf("%d, ", sendDispls[i]);
-#endif
-  }
-#ifdef DEBUG
-  printf("\n\n");
-#endif
-}
-*/

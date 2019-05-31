@@ -43,10 +43,10 @@ int getFilesName(t_FileName **fileNames, char *dirPath) {
   return fileNumber;
 }
 
-long int getLinesNumber(t_FileName *fileNames, int fileNumber, char *dirPath) {
+unsigned long int getLinesNumber(t_FileName *fileNames, int fileNumber, char *dirPath) {
   // Read all files using the fileNames
   t_FileName *fileNamesPtr = fileNames;
-  long int totalLineNumber = 0;
+  unsigned long int totalLineNumber = 0;
   for (int i = 0; i < fileNumber; i++) {
     char *fileFullName = (char *)calloc(
         strlen(dirPath) + strlen(fileNamesPtr->fileName) + 1, sizeof(char));

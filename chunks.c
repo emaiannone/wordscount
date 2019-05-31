@@ -2,14 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define DEBUG
+//#define DEBUG
 
 t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
-                            long int totalLines, int workers) {
-  long int stdChunkSize = totalLines / workers;
+                            unsigned long int totalLines, int workers) {
+  unsigned long int stdChunkSize = totalLines / workers;
   int remainder = totalLines % workers;
 
-  long int nextChunkSize = stdChunkSize;
+  unsigned long int nextChunkSize = stdChunkSize;
   if (remainder > 0) {
     nextChunkSize++;
     remainder--;
@@ -18,7 +18,7 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
   t_ChunkNode *firstChunkPtr = NULL, *wordPtr = NULL;
   for (int i = 0; i < fileNumber; i++) {
     long int lastLine = -1;
-    long int leftLines = fileNamesPtr->lineNumber;
+    unsigned long int leftLines = fileNamesPtr->lineNumber;
     while (leftLines > 0) {
       // New chunk for this file. If it is the first, it will be the head
       if (wordPtr == NULL) {
@@ -41,7 +41,7 @@ t_ChunkNode *buildChunkList(t_FileName *fileNames, int fileNumber,
           leftLines, wordPtr->fileName->fileName, nextChunkSize);
 #endif
       // Compute the amount of lines that can be used
-      long int actualChunkSize;
+      unsigned long int actualChunkSize;
       if (leftLines >= nextChunkSize) {
         actualChunkSize = nextChunkSize;
         nextChunkSize = stdChunkSize;

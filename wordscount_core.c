@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
-                    int myChunkNumber, char *dirPath) {
+unsigned long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
+                             int myChunkNumber, char *dirPath) {
   *myHistogramList = NULL;
-  long int countedWords = 0;
+  unsigned long int countedWords = 0;
   char wordBuf[LINE_LIMIT];
 
   for (int i = 0; i < myChunkNumber; i++) {
@@ -34,25 +34,27 @@ long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
 
       // Look for the read word in the myHistogramList. If present, increase
       // occurences, otherwise append a new node
-      if (*myHistogramList == NULL) {
-        *myHistogramList = (t_WordNode *)malloc(sizeof(t_WordNode));
-        strcpy((*myHistogramList)->word.word, wordBuf);
-        (*myHistogramList)->word.occurances = 1;
-        (*myHistogramList)->next = NULL;
-      } else {
-        t_WordNode *wordNodePtr = *myHistogramList;
-        while (strcmp(wordNodePtr->word.word, wordBuf) != 0 &&
-               wordNodePtr->next != NULL) {
-          wordNodePtr = wordNodePtr->next;
-        }
-        if (strcmp(wordNodePtr->word.word, wordBuf) != 0) {  // Not found
-          wordNodePtr->next = (t_WordNode *)malloc(sizeof(t_WordNode));
-          wordNodePtr = wordNodePtr->next;
-          strcpy(wordNodePtr->word.word, wordBuf);
-          wordNodePtr->word.occurances = 1;
-          wordNodePtr->next = NULL;
-        } else {  // Found
-          wordNodePtr->word.occurances++;
+      if (strcmp(wordBuf, "") != 0) {
+        if (*myHistogramList == NULL) {
+          *myHistogramList = (t_WordNode *)malloc(sizeof(t_WordNode));
+          strcpy((*myHistogramList)->word.word, wordBuf);
+          (*myHistogramList)->word.occurances = 1;
+          (*myHistogramList)->next = NULL;
+        } else {
+          t_WordNode *wordNodePtr = *myHistogramList;
+          while (strcmp(wordNodePtr->word.word, wordBuf) != 0 &&
+                 wordNodePtr->next != NULL) {
+            wordNodePtr = wordNodePtr->next;
+          }
+          if (strcmp(wordNodePtr->word.word, wordBuf) != 0) {  // Not found
+            wordNodePtr->next = (t_WordNode *)malloc(sizeof(t_WordNode));
+            wordNodePtr = wordNodePtr->next;
+            strcpy(wordNodePtr->word.word, wordBuf);
+            wordNodePtr->word.occurances = 1;
+            wordNodePtr->next = NULL;
+          } else {  // Found
+            wordNodePtr->word.occurances++;
+          }
         }
       }
     }

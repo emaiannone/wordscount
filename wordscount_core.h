@@ -2,7 +2,7 @@
 
 typedef struct Word {
   char word[LINE_LIMIT];
-  long int occurances;
+  unsigned long int occurances;
 } t_Word;
 
 typedef struct WordNode {
@@ -10,7 +10,7 @@ typedef struct WordNode {
   struct WordNode *next;
 } t_WordNode;
 
-long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
+unsigned long int wordscount(t_WordNode **myHistogramList, t_Chunk *myChunks,
                     int myChunkNumber, char *dirPath);
 int wordsToArray(t_Word **wordArray, t_WordNode *wordList);
 void compactHistogram(t_WordNode **finalHistogramList,
