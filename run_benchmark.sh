@@ -1,33 +1,36 @@
 make
-#TODO Propagate the executable wordscount and files to slave nodes
+#TODO Propagate the executable wordscount and files and machinefile to slave nodes
 if [ $? -eq 0 ]
 then
-    STRONG_FILE="strong_times.txt"
-    WEAK_FILE="weak_times.txt"
-    FILE_DIR="files"
-    N_CORES=$(grep -c ^processor /proc/cpuinfo)
-    #Enable this on cloud n_cores=$n_cores*8
+    STRONG_FILE="strong_times"
+    WEAK_FILE="weak_times"
+    STRONG_DIR="times/strong"
+    WEAK_DIR="times/weak"
+    if [ -z $1 ]
+    then
+        echo "Supply number of executions"
+    else
+        rm -rf "times"
+        mkdir -p $STRONG_DIR
+        mkdir -p $WEAK_DIR
 
-    rm $STRONG_FILE
-    rm $WEAK_FILE
+        N_EXECUTIONS=$1
+        for ((i=1;i<=N_EXECUTIONS;i++));
+        do
+            echo "---------------Execution #$i---------------"
+            STRONG_FILE_I=$STRONG_FILE"_"$i
+            ./run_strong_benchmark.sh $STRONG_FILE_I
+            mv $STRONG_FILE_I $STRONG_DIR
+        done
 
-    #Strong scalability
-    echo "---------------Strong scalability with $N_CORES process(es) on $FILE_DIR directory---------------"
-    for ((i=1;i<=N_CORES;i++));
-    do
-        echo "---------------Lauching with $i process(es)---------------"
-        mpirun -np $i wordscount $FILE_DIR $STRONG_FILE
-    done
-
-    #Weak scalability
-    echo "---------------Weak scalability with $N_CORES process(es)---------------"
-    for ((i=1;i<=N_CORES;i++));
-    do
-        echo "---------------Lauching with $i process(es)---------------"
-        WORK_DIR=$FILE_DIR$i
-        mpirun -np $i wordscount $WORK_DIR $WEAK_FILE
-    done
-
+        for ((i=1;i<=N_EXECUTIONS;i++));
+        do
+            echo "---------------Execution #$i---------------"
+            WEAK_FILE_I=$WEAK_FILE$i
+            ./run_weak_benchmark.sh $WEAK_FILE_I
+            mv $WEAK_FILE_I $WEAK_DIR
+        done
+    fi
 else
     echo "Building errors: fix them before launching benchmarks"
 fi
