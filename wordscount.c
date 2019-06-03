@@ -69,7 +69,7 @@
 #define TIME
 //#define DEBUG
 #define DEFAULT_FILE_LOCATION "./files/"
-#define DEFAULT_TIME_LOG_FILE "time_log.txt"
+#define DEFAULT_TIME_LOG_FILE "time_log"
 
 void createChunkDatatype(MPI_Datatype *newDatatype) {
   int blockNumber = 3;
