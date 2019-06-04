@@ -75,22 +75,47 @@ To easiliy launch benchmark, three different shell script (.sh) files have been 
 - **run_benchmark.sh** that launch the building using make and if it is successful, it launches strong and weak scalability script files using ALL virtual processors on the machine multiplied by 8. An extra CLI parameter must be provided to put the number of benchmark execution, useful for the analysis of the benchmark because a single benchmark might not be reliable.  
 Each i exectution creates two file: **strong_file_i** and **weak_file_i**, stored in two directories: *times/strong* for strong time logs and *times/weak* for weak time logs. Example: `./run_benchmark.sh 4` that launches the benchmarks 4 times. If the machine has 2 processors, the strong and weak scalability benchmarks will be launched 2 x 4 = 8 times each, with a total of 2 x 4 x 2 = 16 launches of wordscount.
 
-## Benchmarks on the cloud
-- Describe the benchmark environment like the EC2 istance that should be used, their specs and and their number
+## Setup of Cloud Environment
+In order to launch the benchmarks, we need a cluster of EC2 instances. These instances should have been 8 of t2.xlarge, that have 4 vCPUs (Intel up to 3GHZ) and 16GiB of memory. However, AWS Educate has a limit of 5 t2.xlarge instances, to only 5 instances were used for this benchmark.  
+The AMI is *ami-024a64a6685d05041*, an Ubuntu Server 18.04 LTS machine with x86 architecture.  
+After creating 5 instances, the send_to_master.tar.gz archive should be send to master node. Master should copy this archive to pcpc user and then unpack this archive, compile the whole project using make, and then create the machinefile. All this directory, with the source code, input files, executable file and machinefile, should be compressed again and sent to each slave nodes, on pcpc user. Slave should only unpack it.  
+The setup is complete: on master node `./run_benchmark.sh 4` can be launched to launch 4 times strong and weak scalability benchmarks. All the result will be stored in *times* subdirectories. 
 
-### How to run a benchmark
-- Create 8 EC2 instances that...
-- Launch benchmark srcipt
-- Wait
-- See time log files in times directory: strong and weak
+## Example of a benchmark
+These are the steps followed to setup the cloud environment:
+1. Creation of an **empty directory named *data***;
+2. Creation of a **directory named *key*** that have the .pem key file;
+3. Launched command `./make_cluster.sh ami-024a64a6685d05041 ubuntu sg-09f21591cbc4c3e23 t2.xlarge devenv-key 3 pcpc pcpc` where:
+    3.1.  (installa OpenMPI 2.1.1 perché chiede poco tempo. La 4.0.0 richiede troppo tempo di compilazione)
+4. Waiting for instances creation
+5. Secure copy of send_to_master.tar.gz archive with command: `scp -i key/devenv-key.pem send_to_master.tar.gz ubuntu@3.86.53.113:/home/ubuntu;`
+6. ssh -i key/devenv-key.pem ubuntu@3.86.53.113 (provare con MASTER)
+7. sudo cp send_to_master.tar.gz /home/pcpc
+8. su - pcpc with password pcpc
+9. tar -zxvf send_to_master.tar.gz
+10. cd send_to_master
+11. make
+12. vim e creare un machinefile così: 
+    MASTER slots=1
+    NODE_1 slots=1
+    NODE_2 slots=1
+    NODE_3 slots=1
+    NODE_4 slots=1
 
-### Example of a benchmark
-- Show how to setup the cloud environment  (provide the DESI script)
-- Show how to launch benchmark script
-- Show terminal of execution
-- Show how to read time log files
+13. cd ..
+14. rm -f send_to_master.tar.gz
+15. tar -zcvf send_to_master.tar.gz send_to_master
+16. scp send_to_master.tar.gz pcpc@NODE_1:/home/pcpc (NODE_1 valore già memorizzato in /etc/hosts)
+17. scp send_to_master.tar.gz pcpc@NODE_2:/home/pcpc
+18. ssh pcpc@NODE_1 tar -zxvf send_to_master.tar.gz
+18. ssh pcpc@NODE_2 tar -zxvf send_to_master.tar.gz
+19. cd send_to_master
+20. ./run_benchmark.sh 2 (creare cloud_benchmark piuttosto che tiene conto delle istanze e del machinefile)
+
+The setup is complete: on master node the following command was used: `./run_benchmark.sh 4` in order to launch 4 times strong and weak scalability benchmarks. All the result were be stored in *times* subdirectories, so all data were gathered and written in *graphs.py* Python script file, in order to generate the benchmark graphs:
+
+### Graph Evaluation
 - Evaluation graphs
-- Exmplain which script has been used to make these plots
  
 ## Conclusions
 - What can be changed to improve performances
