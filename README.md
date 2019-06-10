@@ -55,14 +55,14 @@ The final output of the program is the compacted histogram, printed in the *stdo
 All time logging data are first printed on *stdout* and then written on the time log file.  
 The program has different phases, each of them has a time profile:
 - **Init** is the time that master process took for the *initializaion phase*. In this phase the master:
-  - Get all files names;
-  - Get all files lines;
-  - Prepare the chunks. 
-- **Scattering** is the time that master process took for scattering the chunks to slave processes and the time that slaves took for receiving their chunks. This time is present as a **arithmethic mean of all scatting times**;
-- **Wordscount** is the time that a process took to execute wordscount algorithm on its chunks. This time is present as a **arithmethic mean of all wordscount times**;
-- **Gathering** is the time that a slave took for sending its histogram back to master and the time that master took for gathering all the histograms. This time is present as a **arithmethic mean of all gathering times**;
+  - Gets all files names;
+  - Gets all files lines;
+  - Prepares the chunks. 
+- **Scattering** is the time that master process took for scattering the chunks to slave processes and the time that slaves took for receiving their chunks. This time is shown as an **arithmethic mean of all scatting times**;
+- **Wordscount** is the time that a process took to execute wordscount algorithm on its chunks. This time is shown as an **arithmethic mean of all wordscount times**;
+- **Gathering** is the time that a slave took for sending its histogram back to master and the time that master took for gathering all the histograms. This time is shown as an **arithmethic mean of all gathering times**;
 - **Compaction** is the time that master took for compacting all the histograms into a single one.
-- **Global** is the time that a process took for its entire execution. This time is present as a **arithmethic mean of all global times**.
+- **Global** is the time that a process took for its entire execution. This time is shown as an **arithmethic mean of all global times**.
 
 This is an example of a time log for a sequential execution:
 
@@ -100,7 +100,7 @@ Example: `./run_strong_benchmark.sh 8 strong_files/1 strong_time_1_1` that launc
   - File input directory parent path;
   - Time log file name.
 
-Example: `./run_weak_benchmark.sh 8 weak_files/1 weak_time_1_1` that launches wordscount 8 times, with 1, 2, ..., 8 processes, using each time *weak_files/1* as parent directory where all input files are located and using *weak_time_1_1* as time log file. *weak_files/1* contains some directories named *pX*, where X is a number and the directory pI will be used in the I-th launch of wordscount, so in this example for the launch with 1 process, p1 is used, for the launch with 2 processes, p2 is used, etc.
+Example: `./run_weak_benchmark.sh 8 weak_files/1 weak_time_1_1` launches wordscount 8 times, with 1, 2, ..., 8 processes, using each time *weak_files/1* as parent directory where all input files are located and using *weak_time_1_1* as time log file. *weak_files/1* contains some directories named *pX*, where X is a number and the directory pI will be used in the I-th launch of wordscount, so in this example for the launch with 1 process, p1 is used, for the launch with 2 processes, p2 is used, etc.
 - **run_benchmark.sh** that launches the **building with make** and if it is successful, it **launches strong and weak scalability scripts using ALL virtual processors on the machine multiplied by 5 (hardcoded in the scripts)**. It accepts two CLI parameters:
   - **Number of executions**, that is the number of times which the two kinds of benchmarks will be repeated. This is useful for the analysis of the benchmarks because a single benchmark might not be reliable.
   - **Machinefile**, when specified, the mpirun will use this machinefile as hostfile to run in "cloud mode", otherwise mpirun will run in "local mode".
@@ -108,35 +108,38 @@ Example: `./run_weak_benchmark.sh 8 weak_files/1 weak_time_1_1` that launches wo
 This benchmark works on **3 different file input directories (hardcoded in the scripts)**.  
 Each i-th exectution on the j-th file input directory creates two files: **strong_file_i_j** and **weak_file_i_j**, stored in two directories: *times/strong* for strong time logs and *times/weak* for weak time logs.
 
-Example (local): `./run_benchmark.sh 4` that launches the benchmarks 4 times in local mode. If the local machine has 2 processors, the strong and weak scalability benchmarks will be launched 2 (processors) x 3 (instances) x 4 (rounds) = 24 times each, with a total of 48 executions of wordscount.
+Example (local): `./run_benchmark.sh 4` launches the benchmarks 4 times in local mode. If the local machine has 2 processors, the strong and weak scalability benchmarks will be launched 2 (processors) x 3 (instances) x 4 (rounds) = 24 times each, with a total of 48 executions of wordscount.
 
-Example (cloud): `./run_benchmark.sh 4 machinefile` that launches the benchmarks 4 times in cloud mode. If the node has 4 processors, the strong and weak scalability benchmarks will be launched 2 (processors) x 5 (nodes) x 3 (instances) x 4 (rounds) = 120 times each, with a total of 240 executions of wordscount.
+Example (cloud): `./run_benchmark.sh 4 machinefile` launches the benchmarks 4 times in cloud mode. If the node has 4 processors, the strong and weak scalability benchmarks will be launched 2 (processors) x 5 (nodes) x 3 (instances) x 4 (rounds) = 120 times each, with a total of 240 executions of wordscount.
 
 ## General setup of Cloud Environment
-In order to launch these benchmarks, we need a cluster of EC2 instances. These instances should have been 8 of **t2.xlarge, that have 4 vCPUs (Intel Xeon up to 3GHZ) and 16GiB of memory**. However, AWS Educate has a limit of 5 t2.xlarge instances, so **only 5 instances were used for this benchmark**.  
+In order to launch these benchmarks, we need a cluster of EC2 instances. These instances should have been 8 of **t2.xlarge (4 vCPUs (Intel Xeon up to 3GHZ) and 16GiB of memory)**. However, AWS Educate has a limit of 5 instances of this type, so **only 5 t2.xlarge were used for this benchmark**.  
 The choosen AMI is *ami-024a64a6685d05041*, an **Ubuntu Server 18.04 LTS machine with x86 architecture**.  
-After creating the 5 instances:
-- The send_to_master.tar.gz archive should be send from local to master node;
-- Master node should copy this archive to pcpc user;
-- Master node, on pcpc, should:
-  - Unpack this archive;
+These are the general steps to launch a benchmark:
+- Create the 5 instances cluster;
+- Send send_to_master.tar.gz archive from local to master node;
+- Copy this archive to pcpc@master;
+- On pcpc@master:
+  - Unpack the archive and go inside the unpacked directory;
   - Compile the whole project using `make`;
   - Create the right machinefile;
-  - Repack the send_to_master directory into another tar.gz
+  - Repack the send_to_master directory into another archive;
   - Send the archive to all slave nodes;
 - Each slave should only unpack the archive.
+
 The setup is complete, now on pcpc@master the following command will run the benchmarks: `./run_benchmark.sh 4 machinefile`.
 
 ## Example of a benchmark
-The local environment was a Ubuntu 19 run on VMWare, executed on Windows 10. The local machine has Intel Core i5 4 core, with Hyper-Threading enables, up to 3.4GHz and 8GB of memory.  
-These are the steps followed to setup the cloud environment used to run the benchmarks:
+The local environment used Windows 10 to host an Ubuntu 19 VM through VMWare Workstation Player 15. The local machine has Intel Core i5 4 core, with Hyper-Threading enabled, up to 3.4GHz and 8GB of memory.  
+In order to easily setup the cluster, `make_cluster.sh` script was used.  
+These are the steps followed to setup the cloud environment and to run the benchmarks:
 1. Put **make-cluster-sh** in home directory (una tantum);
 2. Put **send_to_master.tar.gz** in home directory (una tantum);
 3. Create an **empty directory named *data*** in home directory (una tantum);
-4. Create a **directory named *key*** in home directory that have the .pem key file (una tanum);
+4. Create a **directory named *key*** in home directory that have the *.pem* key file (una tanum);
 5. **Install jq** (una tantum): `sudo apt install jq`
 6. Initialize the **AWS session**;
-7. **Crate the EC2 cluster**: `./make_cluster.sh ami-024a64a6685d05041 ubuntu sg-09f21591cbc4c3e23 t2.xlarge devenv-key 5 pcpc pcpc` where:
+7. **Create the EC2 cluster**: `./make_cluster.sh ami-024a64a6685d05041 ubuntu sg-09f21591cbc4c3e23 t2.xlarge devenv-key 5 pcpc pcpc` where:
     1. *ami-024a64a6685d05041*, the AMI code for the Ubuntu Server 18.04;
     2. *ubuntu*, the name of the default user of the master node;
     3. *sg-09f21591cbc4c3e23*, the ID of the selected security group (NOT the name);
@@ -145,13 +148,13 @@ These are the steps followed to setup the cloud environment used to run the benc
     6. *5*, the desiderd number of nodes;
     7. The first *pcpc*, the username of the user for the MPI execution;
     8. The second *pcpc*, the password of the user for the MPI execution.  
-Note: This will install **OpenMPI 2.1.1**. Newer versions of MPI could be installed by unpacking the OpenMPI archive and the compiling it all, but this would require to much time to setup the whole cluster. The entire setup will require about 5 minutes;
-8. **Send send_to_master.tar.gz to master node**: `scp -i key/devenv-key.pem send_to_master.tar.gz ubuntu@masterIP:/home/ubuntu`, where masterIP is to be replaced by the *master public IP*;
-9. **Connect to master node**: `ssh -i key/devenv-key.pem ubuntu@masterIP`, where masterIP is to be replaced by the *master public IP*;
-10. **Copy send_to_master.tar.gz to pcpc user**: `sudo cp send_to_master.tar.gz /home/pcpc`;
+Note: This will install **OpenMPI 2.1.1**. Newer versions of MPI could be installed by unpacking the OpenMPI archive and the compiling it all, but this would require to much time to setup the whole cluster. The entire setup lasts about 5 minutes;
+8. **Send *send_to_master.tar.gz* to master node**: `scp -i key/devenv-key.pem send_to_master.tar.gz ubuntu@masterIP:/home/ubuntu`, where masterIP must be replaced by the *master public IP*;
+9. **Connect to master node**: `ssh -i key/devenv-key.pem ubuntu@masterIP`, where masterIP must be replaced by the *master public IP*;
+10. **Copy *send_to_master.tar.gz* to pcpc user**: `sudo cp send_to_master.tar.gz /home/pcpc`;
 11. **Change user to pcpc**: `su - pcpc`. This will prompt the user to insert the password, that is *pcpc*;
-12. **Unpack send_to_master.tar.gz**: `tar -zxvf send_to_master.tar.gz`;
-13. **Go into send_to_master directory**: `cd send_to_master`
+12. **Unpack *send_to_master.tar.gz***: `tar -zxvf send_to_master.tar.gz`;
+13. **Go into *send_to_master* directory**: `cd send_to_master`
 14. **Launch wordscount building**: `make`
 15. **Launch VIM and create a file named *machinefile* with this content**:
 
@@ -160,76 +163,77 @@ Note: This will install **OpenMPI 2.1.1**. Newer versions of MPI could be instal
         NODE_2 slots=4
         NODE_3 slots=4
         NODE_4 slots=4
-    Note: These MASTER, NODE_1,... are values stored in */etc/hosts*, created when make_cluster.sh was launched; 
-16. **Go back to home directory**: `cd ..`
-17. **Remove the old send_to_master.tar.gz**: `rm -f send_to_master.tar.gz`
-18. **Create a new send_to_master.tar.gz**: `tar -zcvf send_to_master.tar.gz send_to_master`
-19. **Send the new send_to_master.tar.gz to each slave node**:
+    Note: These MASTER, NODE_1,... are values stored in */etc/hosts* in each node, created during the make_cluster.sh setup; 
+16. **Go back to home directory**: `cd ..`;
+17. **Remove the old *send_to_master.tar.gz***: `rm -f send_to_master.tar.gz`;
+18. **Create a new *send_to_master.tar.gz***: `tar -zcvf send_to_master.tar.gz send_to_master`;
+19. **Send the new *send_to_master.tar.gz* to each slave node**:
     1. `scp send_to_master.tar.gz pcpc@NODE_1:/home/pcpc`
     2. `scp send_to_master.tar.gz pcpc@NODE_2:/home/pcpc`
     3. `scp send_to_master.tar.gz pcpc@NODE_3:/home/pcpc`
     4. `scp send_to_master.tar.gz pcpc@NODE_4:/home/pcpc`
-20. **Unpack send_to_master.tar.gz in each slave**:
+20. **Unpack *send_to_master.tar.gz* in each slave**:
     1. `ssh pcpc@NODE_1 tar -zxvf send_to_master.tar.gz`
     2. `ssh pcpc@NODE_2 tar -zxvf send_to_master.tar.gz`
     3. `ssh pcpc@NODE_3 tar -zxvf send_to_master.tar.gz`
     4. `ssh pcpc@NODE_4 tar -zxvf send_to_master.tar.gz`
-21. **Go into send_to_master directory**: `cd send_to_master`
-22. **Launch benchmarks**: `./run_benchmark.sh 4 machinefile`
+21. **Go into *send_to_master* directory**: `cd send_to_master`;
+22. **Launch benchmarks**: `./run_benchmark.sh 4 machinefile`.
 
-### Graph evaluation
-All the time profiling data are stored in *times* subdirectories. These data were manually gathered into a single text file, named *benchmark-times*, then a Python script, named *WordsCountGraphs.py*, reads these data and generates the graphs.
+### Plot evaluation
+All the time profiling data are stored in subdirectories of *times*. These data were manually gathered into a single text file, named *benchmark-times*, then a Python script, named *WordscountGraphs.py*, reads these data and generates the plots.
 
-**Note I**: X-axis has number of processes, while y-axis has the running time (in ms) whose type depends on the kind of graph (for example, the global time graph has global times in y-axis).  
-**Note II**: Each function is builded using **average times obtained from the 4 different executions** of the benchmarks in order to have more reliable times because there might be some time fluctuations.  
-**Note III**: Each graph has **3 functions, each one representing a benchmark with different input files**. 
-**Note IV**: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories if send_to_master.tar.gz, but any other kind of text file can be used, under the condition of one word per line.
+**Note I**: X-axis has the **number of processes**, while y-axis has the **running time (in ms)** whose type depends on the kind of plot (for example, the global time plot has global times in y-axis).  
+**Note II**: Each function is builded using **average times obtained from the 4 different executions** of the benchmarks in order to have more reliable times because there might have been some time fluctuations during benchmarks.  
+**Note III**: Each plot has **3 functions, each one representing a benchmark with different input files**.  
+**Note IV**: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories in send_to_master.tar.gz.
 
 #### Input files details
-*strong_files* directory has three subdirectories, each with 50% more files that the preceding:
-  - **strong_files/1/** has 100 files for a total of 13.2 MB. Each process will work on `13.2 / np` MB
-  - **strong_files/2/** 150 files for a total of 19.7 MB. Each process will work on `19.7 / np` MB
-  - **strong_files/3/** 200 files for a total of 26.3 MB. Each process will work on `26.3 / np` MB
+*strong_files* directory has three subdirectories, each with 50% more files that the preceding one:
+  - **strong_files/1/** has 100 files for a total of 13.2 MB. Each process will work on `13.2 / np` MB;
+  - **strong_files/2/** has 150 files for a total of 19.7 MB. Each process will work on `19.7 / np` MB;
+  - **strong_files/3/** has 200 files for a total of 26.3 MB. Each process will work on `26.3 / np` MB.
 
-*weak_files* directory has three subdirectories, each with 50% more files that the preceding. Each directory has 20 pX subdirectories:
-  - **weak_files/1/**, each pX has `10 * X` files with a size of `665.1 * X` KB. Each process will always work on 665.1 KB distributed in 10 files.
-  - **weak_files/2/**, each pX has `15 * X` files with a size of `996.2 * X KB`. Each process will always work on 996.2 KB distributed in 15 files.
-  - **weak_files/3/**, each pX has `20 * X` files with a size of `1.3 * X MB`. Each process will always work on 1.3 MB distributed in 20 files.
+*weak_files* directory has three subdirectories, each with 50% more files that the preceding one. Each directory has 20 pX subdirectories:
+  - **weak_files/1/**: each pX has `10 * X` files ,with a size of `665.1 * X` KB. Each process will always work on 665.1 KB distributed in 10 files.
+  - **weak_files/2/**: each pX has `15 * X` files, with a size of `996.2 * X KB`. Each process will always work on 996.2 KB distributed in 15 files.
+  - **weak_files/3/**: each pX has `20 * X` files, with a size of `1.3 * X MB`. Each process will always work on 1.3 MB distributed in 20 files.
 
 #### Strong scalability
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/init_strong.png"><br>
-  Being the init phase only done by master process, and being the input fixed independently from number of processes, the time function is <b>constant</b>. Besides, being each input directory greater by 50% that preceding one, the init time increases by 50%. So, as expected, the init phase does not scale at all.
+  Being the init phase only done by master process, and being the input fixed independently from number of processes, the time function is <b>constant</b>. Besides, being each input directory greater by 50% that the preceding one, <b>the init time increases linearly on input size</b>. So, as expected, the init phase does not scale at all.
 </p>
 
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_strong.png"><br>
-  The <b>decreasing</b> behaviour is correct, because keeping the input fixed implies that each process will receive less work as the number of total processes increases. Considering the function related to <i>strong_files/1/*</i>, the 200 ms took by 1 process reduces to around 20 ms with 20 processes, having a speedup of 10 and not 20 as the ideal case, in fact, for few processes, adding an extra process would cut by half the time, but as soon as the number of process increases the speedup starts to decrease, because intra-cluster communication overhead starts to grow. The wordscount phase has a good strong scalablity.
+  The <b>decreasing</b> behaviour is correct, because keeping the input fixed implies that each process will receive less work as the number of total processes increases. Considering the function related to <i>strong_files/1/</i>, the 200 ms took by 1 process reduces to around 20 ms with 20 processes, having a speedup of 10, however the ideal speedup of 20 is not achievable.<br>
+  <b>With a low number of processes adding an extra process would cut the time by half, but as soon as the number of processes become greater the speedup starts to decrease, because intra-cluster communication overhead starts to grow</b>. The wordscount phase has a good strong scalablity.
 </p>
 
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/global_strong.png"><br>
-  The decreasing behaviour is inherited by wordscount times, but the fluctuations are caused by the constant behaviour of init times. <b>As the number of processes grows, the constant behaviour start to dominate</b>, so the init phase, being totally sequantial, has a bad impact on algorithm strong scalability.
+  The decreasing behaviour is inherited by wordscount times, but the fluctuations are caused by the constant behaviour of init times. <b>As the number of processes grows, the constant behaviour start to dominate</b>. The init phase, being totally sequantial, has a bad impact on strong scalability.
 </p>
 
 #### Weak scalability
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png"><br>
-  Being the init phase only done by master process, and being the input fixed per each process, the master process is forced to work on increasing data, so there is an <b>increasing behaviour</b>. Besides, being each input directory greater by 50% that preceding one, the init time increases by 50%. So, as expected, the init phase does not scale at all.
+  Being the init phase only done by master process, and being the input fixed per each process, the master process is forced to work on increasing data, so there is an <b>increasing behaviour</b>. Besides, being each input directory greater by 50% that preceding one, <b>the init time increases linearly on input size</b>. So, as expected, the init phase does not scale at all.
 </p>
 
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_weak.png"><br>
-  The <b>constant</b> behaviour, aside from some fluctuations, is correct, because keeping the input fixed per process implies that each process will receive the same in every execution, so the total time for wordscount is the same in any case. Besides, being each input directory greater by 50% that preceding one, the wordscount time increases by 50%. The wordscount phase has a good weak scalablity.
+  The <b>constant</b> behaviour, aside from some fluctuations, is correct, because keeping the input fixed per process implies that each process will receive the same amount of work in every execution, so the total time for wordscount is the same in any case. Besides, being each input directory greater by 50% that preceding one, <b>the wordscount time increases linearly on input size</b>. The wordscount phase has a good weak scalablity.
 </p>
 
 <p align="center"> 
 <img src="https://github.com/emaiannone/wordscount/blob/master/figures/global_weak.png"><br>
-  The increasing behaviour is inherited by init times, but the constant behaviour of wordscount times, reduced the gap between the functions. <b>Differently from init phase, if the input size doubles, the required time does not double, but increases by around 40</b>. The init phase, being totally sequantial, has a bad impact on algorithm strong scalability.
+  The increasing behaviour is inherited by init times, but the constant behaviour of wordscount times, reduced the gap between the functions. <b>Differently from the init phase, if the input size doubles, the required time does not double, but increases by around 40%</b>. The init phase, being totally sequantial, has a bad impact on algorithm weak scalability.
 </p>
 
 ## Conclusions
-There are some improvements that can be done:
+There are some improvements that could be done:
 - **Performance**: 
   - The init phase done by a single process is easy to implement but has a very bad impact on performances. An idea might be to count the number of files and then equally divide the files among all processes to let them count the number of lines. However, despite each process will receive an equal number of files, each file might not be the same size as others, so some processes might work more that others;
   - The conversions from a linked list to an array might seem trivial. An option will be to send data directly from the linked list (uncontigous buffer), however the variable number of nodes to send is a bit tricky.
