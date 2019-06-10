@@ -168,47 +168,46 @@ Note: This will install **OpenMPI 2.1.1**. Newer versions of MPI could be instal
 17. **Remove the old send_to_master.tar.gz**: `rm -f send_to_master.tar.gz`
 18. **Create a new send_to_master.tar.gz**: `tar -zcvf send_to_master.tar.gz send_to_master`
 19. **Send the new send_to_master.tar.gz to each slave node**:
-  1. `scp send_to_master.tar.gz pcpc@NODE_1:/home/pcpc`
-  2. `scp send_to_master.tar.gz pcpc@NODE_2:/home/pcpc`
-  3. `scp send_to_master.tar.gz pcpc@NODE_3:/home/pcpc`
-  4. `scp send_to_master.tar.gz pcpc@NODE_4:/home/pcpc`
+    1. `scp send_to_master.tar.gz pcpc@NODE_1:/home/pcpc`
+    2. `scp send_to_master.tar.gz pcpc@NODE_2:/home/pcpc`
+    3. `scp send_to_master.tar.gz pcpc@NODE_3:/home/pcpc`
+    4. `scp send_to_master.tar.gz pcpc@NODE_4:/home/pcpc`
 20. **Unpack send_to_master.tar.gz in each slave**:
-  1. `ssh pcpc@NODE_1 tar -zxvf send_to_master.tar.gz`
-  2. `ssh pcpc@NODE_2 tar -zxvf send_to_master.tar.gz`
-  3. `ssh pcpc@NODE_3 tar -zxvf send_to_master.tar.gz`
-  4. `ssh pcpc@NODE_4 tar -zxvf send_to_master.tar.gz`
+    1. `ssh pcpc@NODE_1 tar -zxvf send_to_master.tar.gz`
+    2. `ssh pcpc@NODE_2 tar -zxvf send_to_master.tar.gz`
+    3. `ssh pcpc@NODE_3 tar -zxvf send_to_master.tar.gz`
+    4. `ssh pcpc@NODE_4 tar -zxvf send_to_master.tar.gz`
 21. **Go into send_to_master directory**: `cd send_to_master`
-22. **Go into send_to_master directory**: `./run_benchmark.sh 4 machinefile`
-23. **Launch benchmarks**: `./run_benchmark.sh 4 machinefile`
+22. **Launch benchmarks**: `./run_benchmark.sh 4 machinefile`
 
 ### Graph evaluation
-All the time profiling data are stored in *times* subdirectories. These data were manualli gathered and written directly in a Python file named *graphs.py* that generates the following graphs.
-Note: Each process has an associated time (in ms) whose meaning depends on the kind of graph (for example the global time graph has global times).  
-Note 2: Each function is builded using **average times obtained from the 4 different executions** of the benchmarks.  
-Note 3: Each graph has **3 functions, each one representing a benchmark with different input files**, whose size is stated in the graph itself. 
-Note 4: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories if send_to_master.tar.gz, but any other kind of text file can be used, under the condition of one word per line.
+All the time profiling data are stored in *times* subdirectories. These data were manually gathered into a single text file, named *benchmark-times*, then a Python script, named *WordsCountGraphs.py*, reads these data and generates the graphs.
+
+**Note I**: X-axis has number of processes, while y-axis has the running time (in ms) whose type depends on the kind of graph (for example, the global time graph has global times in y-axis).  
+**Note II**: Each function is builded using **average times obtained from the 4 different executions** of the benchmarks in order to have more reliable times because there might be some time fluctuations.  
+**Note III**: Each graph has **3 functions, each one representing a benchmark with different input files**. 
+**Note IV**: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories if send_to_master.tar.gz, but any other kind of text file can be used, under the condition of one word per line. *strongs_file* directory has 1/, 2/ and 3/ directories, each 50% greater of the preceding. (INPUT EXPLAINATION AND SIZE INFO)
 
 #### Strong scalability
+(INIT-STRONG)
+(AVG Wordscount-STRONG)
 (AVG GLOBAL-STRONG)
 
-(INIT-STRONG)
-(AVG Scatter-STRONG)
-(AVG Wordscount-STRONG)
-(AVG Gather-STRONG)
-(AVG Compaction-STRONG)
-
 #### Weak scalability
+(INIT-WEAK)
+(AVG Wordscount-WEAK)
 (AVG GLOBAL-WEAK)
 
-(INIT-WEAK)
-(AVG Scatter-WEAK)
-(AVG Wordscount-WEAK)
-(AVG Gather-WEAK)
-(AVG Compaction-WEAK)
+#### Comparison
+(INIT)
+(AVG Wordscount)
+(AVG Global)
 
 ## Conclusions
 There are some improvements that can be done:
 - Performance: 
+  - The init phase done by a single proces only is easy to implement but has bad performances. An idea might be to count the number of files and then equally divide the number of files among all processes to let them count the number of lines. However, despite each process will receive an equal number of files, each file might not be the same size as others, so some processes might work longer that other.
   - The conversion from a linked list to an array might seem trivial. Another option will be to send data directly from the linked list (uncontigous buffer), however the variable number of nodes to send is a bit tricky;
 - Features:
-  - Improve the wordscount in order to read from text files of any kind without the hypothesis of "one word per line". 
+  - Improve the wordscount algorithm in order to read from text files of any kind without the hypothesis of "one word per line". 
+  - Create a more structure benchmarks_times file in order to be parsed easily
