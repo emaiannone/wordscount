@@ -1,7 +1,4 @@
 # Wordscount
-(METTERE make-cluster.sh NELLA REPO FARLO ASSOLUTAMENTE)
-(METTERE lo script python NELLA REPO FARLO ASSOLUTAMENTE)
-(METTERE send_to_master.tar.gz NELLA REPO FARLO ASSOLUTAMENTE)
 Wordscount allows the counting of words from a large number of files using multiple processors of multiple nodes in a cluster. It is implemented in C using OpenMPI.
 
 ## Hypothesis
@@ -186,20 +183,47 @@ All the time profiling data are stored in *times* subdirectories. These data wer
 **Note I**: X-axis has number of processes, while y-axis has the running time (in ms) whose type depends on the kind of graph (for example, the global time graph has global times in y-axis).  
 **Note II**: Each function is builded using **average times obtained from the 4 different executions** of the benchmarks in order to have more reliable times because there might be some time fluctuations.  
 **Note III**: Each graph has **3 functions, each one representing a benchmark with different input files**. 
-**Note IV**: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories if send_to_master.tar.gz, but any other kind of text file can be used, under the condition of one word per line. *strongs_file* directory has 1/, 2/ and 3/ directories, each 50% greater of the preceding. (INPUT EXPLAINATION AND SIZE INFO)
+**Note IV**: The input files used for this benchmark are contained in *strong_files* and *weak_files* directories if send_to_master.tar.gz, but any other kind of text file can be used, under the condition of one word per line.
+
+#### Input files details
+*strong_files* directory has three subdirectories, each with 50% more files that the preceding:
+  - *strong_files/1/* has 100 files for a total of 13.2 MB. Each process will work on `13.2 / np` MB
+  - *strong_files/2/* 150 files for a total of 19.7 MB. Each process will work on `19.7 / np` MB
+  - *strong_files/3/* 200 files for a total of 26.3 MB. Each process will work on `26.3 / np` MB
+*weak_files* directory has three subdirectories, each with 50% more files that the preceding. Each directory has 20 pX subdirectories:
+  - *weak_files/1/*, each pX has 10 * X files with a size of `665.1 * X` KB. Each process will always work on 665.1 KB distributed in 10 files.
+  - *weak_files/2/*, each pX has 15 * X files with a size of `996.2 * X KB`. Each process will always work on 996.2 KB distributed in 15 files.
+  - *weak_files/3/*, each pX has 20 * X files with a size of `1.3 * X MB`. Each process will always work on 1.3 MB distributed in 20 files.
 
 #### Strong scalability
-(INIT-STRONG)
-(AVG Wordscount-STRONG)
-(AVG GLOBAL-STRONG)
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/init_strong.png"><br>
+  Being the init phase only done by master process, and being the input fixed independently from number of processes, the time function is <b>constant</b>. Besides, being each input directory greater by 50% that preceding one, the init time increases by 50%. So, as expected, the init phase does not scale at all.
+</p>
+
+![](https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_strong.png)  
+caption
+
+![](https://github.com/emaiannone/wordscount/blob/master/figures/global_strong.png)  
+caption
 
 #### Weak scalability
-(INIT-WEAK)
-(AVG Wordscount-WEAK)
-(AVG GLOBAL-WEAK)
+![](https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png)  
+caption
+
+![](https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_weak.png)  
+caption
+
+![](https://github.com/emaiannone/wordscount/blob/master/figures/global_weak.png)  
+caption
 
 #### Comparison
-(INIT)
+Strong | Weak
+:---:|:---:
+![](https://github.com/emaiannone/wordscount/blob/master/figures/init_strong.png)  |  ![](https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png)  
+
+caption
+
 (AVG Wordscount)
 (AVG Global)
 
