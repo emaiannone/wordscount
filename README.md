@@ -134,7 +134,7 @@ These are the steps followed to setup the cloud environment used to run the benc
 2. Put **send_to_master.tar.gz** in home directory (una tantum);
 3. Create an **empty directory named *data*** in home directory (una tantum);
 4. Create a **directory named *key*** in home directory that have the .pem key file (una tanum);
-5. **Install jb** (una tantum): `sudo apt install jq`
+5. **Install jq** (una tantum): `sudo apt install jq`
 6. Initialize the **AWS session**;
 7. **Crate the EC2 cluster**: `./make_cluster.sh ami-024a64a6685d05041 ubuntu sg-09f21591cbc4c3e23 t2.xlarge devenv-key 5 pcpc pcpc` where:
     1. *ami-024a64a6685d05041*, the AMI code for the Ubuntu Server 18.04;
@@ -187,13 +187,14 @@ All the time profiling data are stored in *times* subdirectories. These data wer
 
 #### Input files details
 *strong_files* directory has three subdirectories, each with 50% more files that the preceding:
-  - *strong_files/1/* has 100 files for a total of 13.2 MB. Each process will work on `13.2 / np` MB
-  - *strong_files/2/* 150 files for a total of 19.7 MB. Each process will work on `19.7 / np` MB
-  - *strong_files/3/* 200 files for a total of 26.3 MB. Each process will work on `26.3 / np` MB
+  - **strong_files/1/** has 100 files for a total of 13.2 MB. Each process will work on `13.2 / np` MB
+  - **strong_files/2/** 150 files for a total of 19.7 MB. Each process will work on `19.7 / np` MB
+  - **strong_files/3/** 200 files for a total of 26.3 MB. Each process will work on `26.3 / np` MB
+
 *weak_files* directory has three subdirectories, each with 50% more files that the preceding. Each directory has 20 pX subdirectories:
-  - *weak_files/1/*, each pX has 10 * X files with a size of `665.1 * X` KB. Each process will always work on 665.1 KB distributed in 10 files.
-  - *weak_files/2/*, each pX has 15 * X files with a size of `996.2 * X KB`. Each process will always work on 996.2 KB distributed in 15 files.
-  - *weak_files/3/*, each pX has 20 * X files with a size of `1.3 * X MB`. Each process will always work on 1.3 MB distributed in 20 files.
+  - **weak_files/1/**, each pX has `10 * X` files with a size of `665.1 * X` KB. Each process will always work on 665.1 KB distributed in 10 files.
+  - **weak_files/2/**, each pX has `15 * X` files with a size of `996.2 * X KB`. Each process will always work on 996.2 KB distributed in 15 files.
+  - **weak_files/3/**, each pX has `20 * X` files with a size of `1.3 * X MB`. Each process will always work on 1.3 MB distributed in 20 files.
 
 #### Strong scalability
 <p align="center"> 
@@ -201,37 +202,37 @@ All the time profiling data are stored in *times* subdirectories. These data wer
   Being the init phase only done by master process, and being the input fixed independently from number of processes, the time function is <b>constant</b>. Besides, being each input directory greater by 50% that preceding one, the init time increases by 50%. So, as expected, the init phase does not scale at all.
 </p>
 
-![](https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_strong.png)  
-caption
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_strong.png"><br>
+  The <b>decreasing</b> behaviour is correct, because keeping the input fixed implies that each process will receive less work as the number of total processes increases. Considering the function related to <i>strong_files/1/*</i>, the 200 ms took by 1 process reduces to around 20 ms with 20 processes, having a speedup of 10 and not 20 as the ideal case, in fact, for few processes, adding an extra process would cut by half the time, but as soon as the number of process increases the speedup starts to decrease, because intra-cluster communication overhead starts to grow. The wordscount phase has a good strong scalablity.
+</p>
 
-![](https://github.com/emaiannone/wordscount/blob/master/figures/global_strong.png)  
-caption
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/global_strong.png"><br>
+  The decreasing behaviour is inherited by wordscount times, but the fluctuations are caused by the constant behaviour of init times. <b>As the number of processes grows, the constant behaviour start to dominate</b>, so the init phase, being totally sequantial, has a bad impact on algorithm strong scalability.
+</p>
 
 #### Weak scalability
-![](https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png)  
-caption
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png"><br>
+  Being the init phase only done by master process, and being the input fixed per each process, the master process is forced to work on increasing data, so there is an <b>increasing behaviour</b>. Besides, being each input directory greater by 50% that preceding one, the init time increases by 50%. So, as expected, the init phase does not scale at all.
+</p>
 
-![](https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_weak.png)  
-caption
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/wordscount_weak.png"><br>
+  The <b>constant</b> behaviour, aside from some fluctuations, is correct, because keeping the input fixed per process implies that each process will receive the same in every execution, so the total time for wordscount is the same in any case. Besides, being each input directory greater by 50% that preceding one, the wordscount time increases by 50%. The wordscount phase has a good weak scalablity.
+</p>
 
-![](https://github.com/emaiannone/wordscount/blob/master/figures/global_weak.png)  
-caption
-
-#### Comparison
-Strong | Weak
-:---:|:---:
-![](https://github.com/emaiannone/wordscount/blob/master/figures/init_strong.png)  |  ![](https://github.com/emaiannone/wordscount/blob/master/figures/init_weak.png)  
-
-caption
-
-(AVG Wordscount)
-(AVG Global)
+<p align="center"> 
+<img src="https://github.com/emaiannone/wordscount/blob/master/figures/global_weak.png"><br>
+  The increasing behaviour is inherited by init times, but the constant behaviour of wordscount times, reduced the gap between the functions. <b>Differently from init phase, if the input size doubles, the required time does not double, but increases by around 40</b>. The init phase, being totally sequantial, has a bad impact on algorithm strong scalability.
+</p>
 
 ## Conclusions
 There are some improvements that can be done:
-- Performance: 
-  - The init phase done by a single proces only is easy to implement but has bad performances. An idea might be to count the number of files and then equally divide the number of files among all processes to let them count the number of lines. However, despite each process will receive an equal number of files, each file might not be the same size as others, so some processes might work longer that other.
-  - The conversion from a linked list to an array might seem trivial. Another option will be to send data directly from the linked list (uncontigous buffer), however the variable number of nodes to send is a bit tricky;
-- Features:
-  - Improve the wordscount algorithm in order to read from text files of any kind without the hypothesis of "one word per line". 
-  - Create a more structure benchmarks_times file in order to be parsed easily
+- **Performance**: 
+  - The init phase done by a single process is easy to implement but has a very bad impact on performances. An idea might be to count the number of files and then equally divide the files among all processes to let them count the number of lines. However, despite each process will receive an equal number of files, each file might not be the same size as others, so some processes might work more that others;
+  - The conversions from a linked list to an array might seem trivial. An option will be to send data directly from the linked list (uncontigous buffer), however the variable number of nodes to send is a bit tricky.
+- **Features**:
+  - Making the wordscount algorithm read from text files of any kind without the hypothesis of "one word per line"; 
+  - Creating a better structure for *benchmarks_times* file in order to be parsed easily.
